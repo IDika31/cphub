@@ -76,7 +76,20 @@ func (r *ProblemRepository) Upsert(p *model.Problem) error {
 		return r.db.Create(p).Error
 	}
 	p.ID = existing.ID
-	return r.db.Model(existing).Updates(p).Error
+	// Update problem fields
+	if err := r.db.Model(existing).Updates(p).Error; err != nil {
+		return err
+	}
+	// Replace test cases: delete old, create new
+	if len(p.TestCases) > 0 {
+		r.db.Where("problem_id = ?", existing.ID).Delete(&model.TestCase{})
+		for i := range p.TestCases {
+			p.TestCases[i].ID = uuid.New()
+			p.TestCases[i].ProblemID = existing.ID
+		}
+		return r.db.Create(&p.TestCases).Error
+	}
+	return nil
 }
 
 func (r *ProblemRepository) Search(query string, limit int) ([]model.Problem, error) {
