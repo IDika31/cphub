@@ -64,9 +64,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         const editorUrl = cfId
           ? `http://localhost:3000/problems/${cfId}`
           : `http://localhost:3000/problems?provider=${provider}`;
-        setTimeout(() => {
-          chrome.tabs.create({ url: editorUrl });
-        }, 2000);
+        chrome.tabs.create({ url: editorUrl });
       } else {
         chrome.tabs.create({ url: "http://localhost:3000/dashboard" });
       }
