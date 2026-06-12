@@ -160,10 +160,11 @@ func registerRoutes(
 
 	// Dashboard
 	dashboard := app.Group("/api/dashboard", middleware.AuthRequired(cfg.JWT))
-	dashboard.Get("/overview", dashboardHandler.Overview)
-	dashboard.Get("/rating", dashboardHandler.RatingHistory)
-	dashboard.Get("/heatmap", dashboardHandler.Heatmap)
-	dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
+		dashboard.Post("/sync-cf", dashboardHandler.SyncCF)
+		dashboard.Get("/overview", dashboardHandler.Overview)
+		dashboard.Get("/rating", dashboardHandler.RatingHistory)
+		dashboard.Get("/heatmap", dashboardHandler.Heatmap)
+		dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
 
 	// Settings
 	settingsGroup := app.Group("/api/settings", middleware.AuthRequired(cfg.JWT))

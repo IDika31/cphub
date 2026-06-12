@@ -106,6 +106,43 @@ func fetchCFStats(handle string) (solved int64, attempted int64) {
 	return int64(len(uniqueSolved)), attempted
 }
 
+func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
+	userIDStr := c.Locals("userId").(string)
+	userID, _ := uuid.Parse(userIDStr)
+
+	var handle string
+	h.db.Table("linked_accounts").Where("user_id = ? AND provider = ?", userID, "codeforces").Select("handle").Scan(&handle)
+	if handle == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Codeforces not connected"})
+	}
+
+	url := fmt.Sprintf("https://codeforces.com/api/user.status?handle=%s&from=1&count=200", handle)
+	resp, err := http.Get(url)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "CF API error"})
+	}
+	defer resp.Body.Close()
+
+	var cfResp CFStatusResponse
+	json.NewDecoder(resp.Body).Decode(&cfResp)
+
+	count := 0
+	for _, sub := range cfResp.Result {
+		problemRef := sub.Problem.Name
+		h.db.Table("problem_logs").Where("user_id = ? AND problem_id = ? AND action = ?", userID, problemRef, sub.Verdict).
+			FirstOrCreate(&struct {
+				ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid()"`
+				UserID    uuid.UUID
+				ProblemID string
+				Action    string
+			}{UserID: userID, ProblemID: problemRef, Action: sub.Verdict})
+		count++
+	}
+
+	log.Printf("[sync] synced %d CF submissions for user %s", count, userIDStr)
+	return c.JSON(fiber.Map{"status": "ok", "synced": count})
+}
+
 func (h *DashboardHandler) RatingHistory(c *fiber.Ctx) error {
 	userIDStr := c.Locals("userId").(string)
 	userID, _ := uuid.Parse(userIDStr)
