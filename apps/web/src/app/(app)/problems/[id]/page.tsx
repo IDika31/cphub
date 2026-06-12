@@ -256,6 +256,7 @@ export default function ProblemDetailPage() {
           {/* Editor */}
           <div className="flex-[3] min-h-0">
             <MonacoEditor
+              key={id}
               value={code}
               language={language}
               onChange={handleCodeChange}
