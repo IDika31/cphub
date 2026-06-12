@@ -20,9 +20,11 @@ func NewGraderHandler(cfg config.GraderConfig, queue *grader.Queue) *GraderHandl
 }
 
 type RunRequest struct {
-	Language  string            `json:"language"`
-	SourceCode string           `json:"sourceCode"`
-	TestCases []grader.TestCase  `json:"testCases"`
+	Language       string            `json:"language"`
+	SourceCode     string            `json:"sourceCode"`
+	TestCases      []grader.TestCase `json:"testCases"`
+	TimeoutSeconds int               `json:"timeoutSeconds"`
+	MemoryLimitMB  int               `json:"memoryLimitMB"`
 }
 
 func (h *GraderHandler) Run(c *fiber.Ctx) error {
@@ -82,8 +84,12 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 	// Run each test case
 	results := make([]grader.TestResult, 0, len(req.TestCases))
 	for i, tc := range req.TestCases {
+		timeout := h.cfg.TimeoutSeconds
+		if req.TimeoutSeconds > 0 {
+			timeout = req.TimeoutSeconds
+		}
 		ctx, cancel := context.WithTimeout(context.Background(),
-			time.Duration(h.cfg.TimeoutSeconds)*time.Second)
+			time.Duration(timeout)*time.Second)
 		defer cancel()
 
 		execResult, err := grader.RunFirejail(ctx, lang, td, tc.Input, h.cfg.FirejailProfile)
