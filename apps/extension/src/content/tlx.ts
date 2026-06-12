@@ -58,9 +58,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 logger.info("TLX content script loaded");
 
+let lastTlxUrl = "";
 (function autoSync() {
   const detected = detectPageType();
   if (detected.isProblem && detected.provider === "tlx") {
+    if (lastTlxUrl === window.location.href) return;
+    lastTlxUrl = window.location.href;
     setTimeout(() => {
       const data = scrapeProblem();
       if (data) {

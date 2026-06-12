@@ -173,9 +173,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 logger.info("Codeforces content script loaded");
 
 // Auto-sync on page load — if on a problem page, sync automatically
+// Dedup: track last synced URL to avoid duplicate syncs
+let lastSyncedUrl = "";
+
 (function autoSync() {
   const detected = detectPageType();
   if (detected.isProblem && detected.provider === "codeforces") {
+    // Skip if already synced this URL
+    if (lastSyncedUrl === window.location.href) return;
+    lastSyncedUrl = window.location.href;
+
     // Small delay to ensure page is fully loaded
     setTimeout(() => {
       const data = scrapeProblem();
