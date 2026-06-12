@@ -9,6 +9,7 @@ import Button from "@/components/ui/button";
 import Select from "@/components/ui/select";
 import Skeleton from "@/components/ui/skeleton";
 import MonacoEditor from "@/components/editor/monaco-editor";
+import ProblemStatement from "@/components/editor/problem-statement";
 import { fetchProblem } from "@/lib/api/problems";
 import { runCode, type GraderResult } from "@/lib/api/grader";
 import { getDefaultTemplate } from "@/lib/template";
@@ -151,8 +152,6 @@ export default function ProblemDetailPage() {
             </div>
           ) : problem ? (
             <div className="bg-[#18181b] rounded-[8px] border border-[rgba(255,255,255,0.08)] p-[16px]">
-              <h2 className="text-[16px] font-semibold text-[#e4e4e7] mb-3">{problem.title}</h2>
-
               {tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-3">
                   {tags.map((t: string) => (
@@ -162,18 +161,12 @@ export default function ProblemDetailPage() {
                   ))}
                 </div>
               )}
-
-              <div className="text-[13px] text-[#e4e4e7] leading-relaxed whitespace-pre-wrap">
-                {problem.statement || problem.inputSpec || "No statement available. Sync this problem from Codeforces or TLX."}
-              </div>
-
+              <ProblemStatement
+                html={problem.statement || ""}
+                title={problem.title}
+              />
               {problem.url && (
-                <a
-                  href={problem.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block mt-3 text-[11px] text-[#8b5cf6] hover:underline"
-                >
+                <a href={problem.url} target="_blank" rel="noopener noreferrer" className="inline-block mt-3 text-[11px] text-[#8b5cf6] hover:underline">
                   View on {problem.provider} →
                 </a>
               )}

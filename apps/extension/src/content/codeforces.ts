@@ -4,37 +4,113 @@ import { logger } from "../shared/logger";
 
 function scrapeProblem(): Record<string, unknown> | null {
   try {
-    const titleEl = document.querySelector(".problem-statement .header .title");
-    if (!titleEl) return null;
-    const title = titleEl.textContent?.trim() || "";
-    const timeEl = document.querySelector(".time-limit");
-    const memEl = document.querySelector(".memory-limit");
+    const container = document.querySelector(".problemindexholder");
+    if (!container) return null;
+
+    // Title
+    const titleEl = container.querySelector(".problem-statement .header .title");
+    const title = titleEl?.textContent?.trim() || "";
+
+    // Time limit
+    const timeEl = container.querySelector(".time-limit");
+    const timeLimit = timeEl?.lastChild?.textContent?.trim() || timeEl?.textContent?.replace("time limit per test", "").trim() || "";
+
+    // Memory limit
+    const memEl = container.querySelector(".memory-limit");
+    const memoryLimit = memEl?.lastChild?.textContent?.trim() || memEl?.textContent?.replace("memory limit per test", "").trim() || "";
+
+    // Statement — capture full HTML with MathJax
+    const statementEl = container.querySelector(".problem-statement > div:not(.header):not(.input-specification):not(.output-specification):not(.sample-tests):not(.note)");
+    const statementHTML = statementEl?.innerHTML || "";
+
+    // Input specification
+    const inputSpecEl = container.querySelector(".input-specification");
+    const inputSpecHTML = inputSpecEl?.innerHTML || "";
+
+    // Output specification
+    const outputSpecEl = container.querySelector(".output-specification");
+    const outputSpecHTML = outputSpecEl?.innerHTML || "";
+
+    // Note
+    const noteEl = container.querySelector(".note");
+    const noteHTML = noteEl?.innerHTML || "";
+
+    // Tags from sidebar
     const tagEls = document.querySelectorAll(".tag-box");
     const tags = Array.from(tagEls).map((el) => el.textContent?.trim() || "").filter(Boolean);
 
-    const sampleInputs = document.querySelectorAll(".input pre");
-    const sampleOutputs = document.querySelectorAll(".output pre");
+    // Difficulty from problem index page or contest page
+    // Try to get from the problem rating span
+    const ratingEl = document.querySelector("span.difficulty-color, span.problem-rating");
+    const difficultyText = ratingEl?.textContent?.trim() || "";
+    const difficulty = parseInt(difficultyText.replace(/\D/g, "")) || 0;
+
+    // Extract LaTeX from MathJax spans
+    const mathSpans = container.querySelectorAll("script[type='math/tex'], script[type='math/tex; mode=display']");
+    const latexExpressions: Record<string, string> = {};
+    mathSpans.forEach((span, i) => {
+      const key = `__LATEX_${i}__`;
+      const tex = span.textContent || "";
+      latexExpressions[key] = tex;
+    });
+
+    // Sample test cases — preserve exact text with newlines
+    const sampleTestDiv = container.querySelector(".sample-tests");
     const testCases: Array<{ input: string; output: string; isSample: boolean }> = [];
-    for (let i = 0; i < Math.min(sampleInputs.length, sampleOutputs.length); i++) {
-      testCases.push({
-        input: sampleInputs[i].textContent?.trim() || "",
-        output: sampleOutputs[i].textContent?.trim() || "",
-        isSample: true,
-      });
+    if (sampleTestDiv) {
+      const inputPre = sampleTestDiv.querySelector(".input pre");
+      const outputPre = sampleTestDiv.querySelector(".output pre");
+
+      if (inputPre && outputPre) {
+        // Get raw text — preserve newlines from <div> elements
+        const inputText = getRawText(inputPre);
+        const outputText = getRawText(outputPre);
+        testCases.push({ input: inputText, output: outputText, isSample: true });
+      }
+
+      // Individual test example lines
+      const testLines = sampleTestDiv.querySelectorAll(".test-example-line");
+      if (testLines.length > 0) {
+        const lines = Array.from(testLines).map((el) => el.textContent?.trim() || "");
+        // Group lines into test cases based on the problem
+        // For now, create one test case with all lines
+        if (testCases.length === 0) {
+          testCases.push({
+            input: lines.join("\n"),
+            output: lines.join("\n"),
+            isSample: true,
+          });
+        }
+      }
     }
 
-    const urlParts = window.location.pathname.split("/");
-    const problemId = urlParts[urlParts.length - 1] || "";
+    // Problem ID from URL
+    const urlPath = window.location.pathname;
+    let problemId = "";
+    let contestId = "";
+
+    const contestMatch = urlPath.match(/\/contest\/(\d+)\/problem\/(\w+)/);
+    const problemsetMatch = urlPath.match(/\/problemset\/problem\/(\d+)\/(\w+)/);
+    if (contestMatch) {
+      contestId = contestMatch[1];
+      problemId = `${contestId}${contestMatch[2]}`;
+    } else if (problemsetMatch) {
+      contestId = problemsetMatch[1];
+      problemId = `${contestId}${problemsetMatch[2]}`;
+    }
 
     return {
       problemId,
+      contestId,
       title,
-      statement: document.querySelector(".problem-statement")?.textContent?.trim() || "",
-      inputSpec: document.querySelector(".input-specification")?.textContent?.trim() || "",
-      outputSpec: document.querySelector(".output-specification")?.textContent?.trim() || "",
-      difficulty: 0,
-      timeLimit: timeEl?.textContent?.replace("time limit per test", "").trim() || "",
-      memoryLimit: memEl?.textContent?.replace("memory limit per test", "").trim() || "",
+      statement: statementHTML,
+      inputSpec: inputSpecHTML,
+      outputSpec: outputSpecHTML,
+      note: noteHTML,
+      latex: latexExpressions,
+      difficulty,
+      timeLimit,
+      memoryLimit,
       tags: JSON.stringify(tags),
       url: window.location.href,
       testCases,
@@ -43,6 +119,29 @@ function scrapeProblem(): Record<string, unknown> | null {
     logger.error("Failed to scrape CF problem", err);
     return null;
   }
+}
+
+// Get raw text preserving newlines from <br> and <div> elements
+function getRawText(el: Element): string {
+  let result = "";
+  function walk(node: Node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      result += node.textContent || "";
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = (node as Element).tagName.toLowerCase();
+      if (tag === "br") {
+        result += "\n";
+      } else if (tag === "div") {
+        if (result && !result.endsWith("\n")) result += "\n";
+        node.childNodes.forEach(walk);
+        if (!result.endsWith("\n")) result += "\n";
+      } else {
+        node.childNodes.forEach(walk);
+      }
+    }
+  }
+  el.childNodes.forEach(walk);
+  return result.trim();
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -57,7 +156,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: false, error: "Failed to scrape problem" });
       return true;
     }
-    // Wrap in SyncPayload format expected by background
     chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.SYNC_PROBLEM,
       payload: {
