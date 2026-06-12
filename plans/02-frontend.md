@@ -1,6 +1,6 @@
 # 02 — Frontend: Next.js Web App (`apps/web/`)
 
-> **Status:** ⬜ (0/60)
+> **Status:** 🔵 (6/60) — Foundation done
 
 ---
 
@@ -8,12 +8,12 @@
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|
-| WEB-01 | Init Next.js 14 project (Bun) | ⬜ | `apps/web/package.json` |
-| WEB-02 | TailwindCSS config — dark/light palette, fonts | ⬜ | `apps/web/tailwind.config.ts` |
-| WEB-03 | TypeScript strict config | ⬜ | `apps/web/tsconfig.json` |
-| WEB-04 | `globals.css` — scrollbar, animations | ⬜ | `apps/web/src/app/globals.css` |
-| WEB-05 | Root layout — ThemeProvider (next-themes, `attribute="class"`, `defaultTheme="dark"`) | ⬜ | `apps/web/src/app/layout.tsx` |
-| WEB-06 | Zustand store setup (auth, settings, grader, problems) | ⬜ | `apps/web/src/stores/` |
+| WEB-01 | Init Next.js 14 project (Bun) | ✅ | `apps/web/package.json` |
+| WEB-02 | TailwindCSS config — dark/light palette, fonts | ✅ | `apps/web/tailwind.config.ts` |
+| WEB-03 | TypeScript strict config | ✅ | `apps/web/tsconfig.json` |
+| WEB-04 | `globals.css` — scrollbar, animations | ✅ | `apps/web/src/app/globals.css` |
+| WEB-05 | Root layout — ThemeProvider (next-themes, `attribute="class"`, `defaultTheme="dark"`) | ✅ | `apps/web/src/app/layout.tsx` |
+| WEB-06 | Zustand store setup (auth, settings, grader, problems) | ✅ | `apps/web/src/stores/` |
 
 ## 2.2 Auth Pages — (auth) Route Group (no shell)
 
