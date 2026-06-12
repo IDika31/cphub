@@ -4,6 +4,8 @@ export interface RunRequest {
   language: string;
   sourceCode: string;
   testCases: Array<{ input: string; output: string }>;
+  timeoutSeconds?: number;
+  memoryLimitMB?: number;
 }
 
 export interface TestResult {

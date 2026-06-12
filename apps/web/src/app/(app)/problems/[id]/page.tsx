@@ -58,16 +58,15 @@ export default function ProblemDetailPage() {
         setProblem(p);
         const saved = loadFromLocalStorage(id, language);
         if (!saved) {
+          // Apply template with real metadata from sync
           const tpl = getDefaultTemplate(language);
-          const vars = {
+          const vars: Record<string, string> = {
             provider: p.provider || "cf",
             problemId: p.problemId || id,
             title: p.title || "",
             problemGroup: (p as Record<string,string>).problemGroup || "",
           };
-          const final = applyTemplate(tpl, vars);
-          setCode(final);
-          if (id) saveToLocalStorage(id, language, final);
+          setCode(applyTemplate(tpl, vars));
         } else {
           setCode(saved);
         }
@@ -111,8 +110,10 @@ export default function ProblemDetailPage() {
         // If no test cases, run with empty
         testCases.push({ input: "", output: "" });
       }
+      const timeout = parseInt(problem?.timeLimit || "5") || 5;
+      const memLimit = parseInt(problem?.memoryLimit || "512") || 512;
       const res = await runCode(
-        { language, sourceCode: code, testCases },
+        { language, sourceCode: code, testCases, timeoutSeconds: timeout, memoryLimitMB: memLimit },
         getToken(),
       );
       setResult(res);
