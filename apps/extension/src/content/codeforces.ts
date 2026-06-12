@@ -95,11 +95,17 @@ function scrapeProblem(): Record<string, unknown> | null {
     if (contestMatch) {
       contestId = contestMatch[1];
       problemId = `${contestId}${contestMatch[2]}`;
-      problemGroup = document.querySelector("#sidebar > div:nth-child(1) > table > tbody > tr:nth-child(1) > th")?.textContent?.trim() || "";
+      const xpath = '/html/body/div[6]/div[3]/div[1]/div[1]/table/tbody/tr[1]/th';
+  const groupFromXpath = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue as Element | null;
+  const groupFromCss = document.querySelector('#sidebar > div:nth-child(1) > table > tbody > tr:nth-child(1) > th');
+  problemGroup = groupFromXpath?.textContent?.trim() || groupFromCss?.textContent?.trim() || "";
     } else if (problemsetMatch) {
       contestId = problemsetMatch[1];
       problemId = `${contestId}${problemsetMatch[2]}`;
-      problemGroup = document.querySelector("#sidebar > div:nth-child(1) > table > tbody > tr:nth-child(1) > th")?.textContent?.trim() || "";
+      const xpath = '/html/body/div[6]/div[3]/div[1]/div[1]/table/tbody/tr[1]/th';
+  const groupFromXpath = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue as Element | null;
+  const groupFromCss = document.querySelector('#sidebar > div:nth-child(1) > table > tbody > tr:nth-child(1) > th');
+  problemGroup = groupFromXpath?.textContent?.trim() || groupFromCss?.textContent?.trim() || "";
     }
 
     return {
