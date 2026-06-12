@@ -95,11 +95,17 @@ function scrapeProblem(): Record<string, unknown> | null {
     if (contestMatch) {
       contestId = contestMatch[1];
       problemId = `${contestId}${contestMatch[2]}`;
-      problemGroup = document.querySelector(".caption.titled a, .rtable th a")?.textContent?.trim() || "";
+      const groupLink = document.querySelector(".caption.titled a") 
+        || document.querySelector(".rtable th a")
+        || document.querySelector(".sidebar-menu a[href*='contest']");
+      problemGroup = groupLink?.textContent?.trim() || "";
     } else if (problemsetMatch) {
       contestId = problemsetMatch[1];
       problemId = `${contestId}${problemsetMatch[2]}`;
-      problemGroup = document.querySelector(".caption.titled a, .rtable th a")?.textContent?.trim() || "";
+      const groupLink = document.querySelector(".caption.titled a") 
+        || document.querySelector(".rtable th a")
+        || document.querySelector(".sidebar-menu a[href*='contest']");
+      problemGroup = groupLink?.textContent?.trim() || "";
     }
 
     return {
