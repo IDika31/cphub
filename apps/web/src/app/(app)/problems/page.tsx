@@ -1,21 +1,32 @@
 "use client";
 
-import { useState } from "react";
-import { Search } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Search, Files } from "lucide-react";
+import Link from "next/link";
 import Topbar from "@/components/shell/topbar";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 import EmptyState from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/skeleton";
+import { fetchProblems } from "@/lib/api/problems";
+import type { Problem } from "@/lib/api/types";
 
-const PROVIDERS = ["All", "Codeforces", "TLX"];
-const MOCK_PROBLEMS = [
-  { id: "1", title: "A. Watermelon", provider: "Codeforces", diff: 800, tags: ["math", "brute force"], status: "solved" },
-  { id: "2", title: "B. Permutation", provider: "TLX", diff: 1200, tags: ["dp", "greedy"], status: "attempted" },
-];
+const PROVIDERS = ["", "codeforces", "tlx"];
 
 export default function ProblemsetPage() {
-  const [provider, setProvider] = useState("All");
+  const [provider, setProvider] = useState("");
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    fetchProblems({ provider: provider || undefined })
+      .then((res) => { setProblems(res.data); setTotal(res.total); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [provider]);
 
   return (
     <>
@@ -26,37 +37,36 @@ export default function ProblemsetPage() {
             <input
               className="w-[200px] h-[30px] pl-[28px] pr-[10px] rounded-[6px] text-[12px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7] focus:outline-none focus:border-[#8b5cf6] transition-colors"
               placeholder="Search problems..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Button variant="default">Filter</Button>
         </div>
       </Topbar>
 
       <div className="flex-1 overflow-y-auto p-[14px]">
-        {/* Filter Pills */}
         <div className="flex gap-2 mb-3">
           {PROVIDERS.map((p) => (
             <button
               key={p}
               onClick={() => setProvider(p)}
               className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors ${
-                provider === p
-                  ? "bg-[#8b5cf6] text-white"
-                  : "bg-[#1f1f23] text-[#71717a] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
+                provider === p ? "bg-[#8b5cf6] text-white" : "bg-[#1f1f23] text-[#71717a] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
               }`}
             >
-              {p}
+              {p === "" ? "All" : p === "codeforces" ? "Codeforces" : "TLX"}
             </button>
           ))}
         </div>
 
-        {/* Table */}
-        {MOCK_PROBLEMS.length === 0 ? (
+        {loading ? (
+          <TableSkeleton rows={5} cols={5} />
+        ) : problems.length === 0 ? (
           <EmptyState
-            icon={<Search className="w-8 h-8" />}
-            title="No problems found"
+            icon={<Files className="w-8 h-8" />}
+            title="No problems synced yet"
             description="Sync problems from Codeforces or TLX using the browser extension."
-            action={<Button variant="primary">Sync Problems</Button>}
+            action={<Button variant="primary">Install Extension</Button>}
           />
         ) : (
           <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] overflow-hidden">
@@ -71,39 +81,38 @@ export default function ProblemsetPage() {
                 </tr>
               </thead>
               <tbody>
-                {MOCK_PROBLEMS.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-b border-[rgba(255,255,255,0.04)] hover:bg-[#1f1f23] transition-colors cursor-pointer"
-                  >
-                    <td className="py-[10px] px-[14px] text-[#e4e4e7]">{p.title}</td>
-                    <td className="py-[10px] px-[14px]">
-                      <Badge variant={p.provider === "Codeforces" ? "cf" : "difficulty"}>
-                        {p.provider}
-                      </Badge>
-                    </td>
-                    <td className="py-[10px] px-[14px] text-[#fbbf24]">{p.diff}</td>
-                    <td className="py-[10px] px-[14px]">
-                      <div className="flex gap-1 flex-wrap">
-                        {p.tags.map((t) => (
-                          <span key={t} className="text-[11px] text-[#71717a]">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="py-[10px] px-[14px]">
-                      {p.status === "solved" ? (
-                        <Badge variant="verdict-ac">✓</Badge>
-                      ) : (
-                        <Badge variant="verdict-pending">○</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {problems.map((p) => {
+                  const tags = (() => { try { return JSON.parse(p.tags) as string[] } catch { return [] } })();
+                  return (
+                    <tr key={p.id} className="border-b border-[rgba(255,255,255,0.04)] hover:bg-[#1f1f23] transition-colors cursor-pointer">
+                      <td className="py-[10px] px-[14px]">
+                        <Link href={`/problems/${p.id}`} className="text-[#e4e4e7] hover:text-[#8b5cf6] transition-colors">
+                          {p.title}
+                        </Link>
+                      </td>
+                      <td className="py-[10px] px-[14px]">
+                        <Badge variant={p.provider === "codeforces" ? "cf" : "difficulty"}>{p.provider}</Badge>
+                      </td>
+                      <td className="py-[10px] px-[14px] text-[#fbbf24]">{p.difficulty}</td>
+                      <td className="py-[10px] px-[14px]">
+                        <div className="flex gap-1 flex-wrap">
+                          {tags.slice(0, 3).map((t: string) => (
+                            <span key={t} className="text-[11px] text-[#71717a]">{t}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="py-[10px] px-[14px]">
+                        {p.status === "solved" ? <Badge variant="verdict-ac">✓</Badge> : <Badge variant="verdict-pending">○</Badge>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+        )}
+        {total > 0 && (
+          <p className="text-[11px] text-[#52525b] mt-2 text-right">{total} problems</p>
         )}
       </div>
     </>
