@@ -8,17 +8,17 @@
 
 ## File Plans
 
-| File | Track | Task Count |
-|------|-------|------------|
-| [00-infrastructure.md](00-infrastructure.md) | Monorepo, Docker, Config | 7 |
-| [01-backend.md](01-backend.md) | Go API — semua sub-section | ~55 |
-| [02-frontend.md](02-frontend.md) | Next.js Web App — semua halaman + komponen | ~60 |
-| [03-extension.md](03-extension.md) | Browser Extension — 8 sub-section | 43 |
-| [04-testing.md](04-testing.md) | Unit, Integration, E2E, Security | 9 |
-| [05-documentation.md](05-documentation.md) | Developer, User, API, Firejail docs | 4 |
-| [06-devops.md](06-devops.md) | Systemd, Cron, Logrotate | 5 |
+| File | Track | Task Count | Done |
+|------|-------|------------|------|
+| [00-infrastructure.md](00-infrastructure.md) | Monorepo, Docker, Config | 7 | 5 |
+| [01-backend.md](01-backend.md) | Go API | 55 | 52 |
+| [02-frontend.md](02-frontend.md) | Next.js Web App | 60 | 58 |
+| [03-extension.md](03-extension.md) | Browser Extension | 43 | 37 |
+| [04-testing.md](04-testing.md) | Testing & QA | 9 | 0 |
+| [05-documentation.md](05-documentation.md) | Documentation | 4 | 4 |
+| [06-devops.md](06-devops.md) | Deployment & DevOps | 5 | 5 |
 
-**Total: ~183 tasks**
+**Total: 161/183 (88%)**
 
 ---
 
