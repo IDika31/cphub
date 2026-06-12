@@ -96,7 +96,11 @@ type LogConfig struct {
 }
 
 func Load() *Config {
+	// Look for .env in project root (two levels up from apps/api/)
 	viper.SetConfigFile(".env")
+	viper.AddConfigPath(".")
+	viper.AddConfigPath("..")
+	viper.AddConfigPath("../..") // repo root from apps/api/
 	viper.AutomaticEnv()
 
 	_ = viper.ReadInConfig()

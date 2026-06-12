@@ -29,8 +29,14 @@ func main() {
 		log.Fatalf("[migrate] failed to get sql.DB: %v", err)
 	}
 
+	// Try both relative paths: from repo root and from apps/api/
+	migrationPath := "file://apps/api/migrations"
+	if _, err := os.Stat("apps/api/migrations"); os.IsNotExist(err) {
+		migrationPath = "file://migrations"
+	}
+
 	m, err := migrate.New(
-		"file://migrations",
+		migrationPath,
 		fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 			cfg.DB.User, cfg.DB.Password,
 			cfg.DB.Host, cfg.DB.Port,
