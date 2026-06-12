@@ -53,7 +53,9 @@ export default function ProblemDetailPage() {
       .then((p) => {
         setProblem(p);
         const saved = loadFromLocalStorage(id, language);
-        if (saved) {
+        // Ignore saved code that still has raw placeholders (from buggy version)
+        const hasPlaceholders = saved && /\{(provider|problemId|title|problemGroup)\}/.test(saved);
+        if (saved && !hasPlaceholders) {
           setCode(saved);
         } else {
           const tpl = getDefaultTemplate(language);
