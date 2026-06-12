@@ -6,6 +6,7 @@ export interface Problem {
   statement: string;
   inputSpec: string;
   outputSpec: string;
+  note: string;
   difficulty: number;
   timeLimit: string;
   memoryLimit: string;

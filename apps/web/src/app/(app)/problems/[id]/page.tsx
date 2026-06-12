@@ -167,10 +167,16 @@ export default function ProblemDetailPage() {
                   ))}
                 </div>
               )}
-              <ProblemStatement
-                html={problem.statement || ""}
-                title={problem.title}
-              />
+              <ProblemStatement html={problem.statement || ""} />
+              {problem.inputSpec && (
+                <ProblemStatement html={problem.inputSpec} />
+              )}
+              {problem.outputSpec && (
+                <ProblemStatement html={problem.outputSpec} />
+              )}
+              {problem.note && (
+                <ProblemStatement html={problem.note} />
+              )}
               {problem.url && (
                 <a href={problem.url} target="_blank" rel="noopener noreferrer" className="inline-block mt-3 text-[11px] text-[#8b5cf6] hover:underline">
                   View on {problem.provider} →

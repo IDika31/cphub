@@ -14,6 +14,7 @@ type Problem struct {
 	Statement   string    `gorm:"type:text" json:"statement"`
 	InputSpec   string    `gorm:"type:text" json:"inputSpec"`
 	OutputSpec  string    `gorm:"type:text" json:"outputSpec"`
+	Note        string    `gorm:"type:text" json:"note"`
 	Difficulty  int       `gorm:"default:0" json:"difficulty"`
 	TimeLimit   string    `gorm:"size:20" json:"timeLimit"`
 	MemoryLimit string    `gorm:"size:20" json:"memoryLimit"`
