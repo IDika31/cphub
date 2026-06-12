@@ -194,36 +194,93 @@ func (h *DashboardHandler) Heatmap(c *fiber.Ctx) error {
 
 	var handle string
 	h.db.Table("linked_accounts").Where("user_id = ? AND provider = ? AND is_connected = ?", userID, "codeforces", true).Select("handle").Scan(&handle)
-
 	if handle == "" {
 		return c.JSON(fiber.Map{"data": []interface{}{}})
 	}
 
-	// Fetch CF submissions for heatmap
-	url := fmt.Sprintf("https://codeforces.com/api/user.status?handle=%s&from=1&count=500", handle)
-	resp, err := http.Get(url)
+	subs, err := FetchCFSubmissions(handle, 500)
 	if err != nil {
 		return c.JSON(fiber.Map{"data": []interface{}{}})
 	}
-	defer resp.Body.Close()
 
-	var cfResp CFStatusResponse
-	json.NewDecoder(resp.Body).Decode(&cfResp)
-
-	// Group by date
+	// Group by date (YYYY-MM-DD) → count
 	dateCount := make(map[string]int)
-	for _, sub := range cfResp.Result {
-		_ = sub
-		// We don't have timestamps in this API response for older submissions
-		// Count unique problems per day is approximate
+	for _, sub := range subs {
+		// Unix timestamp → date string
+		date := fmt.Sprintf("%d", sub.CreationTimeSeconds/86400)
+		dateCount[date]++
 	}
-	_ = dateCount
 
-	return c.JSON(fiber.Map{"data": []interface{}{}})
+	type heatmapEntry struct {
+		Date  string `json:"date"`
+		Count int    `json:"count"`
+	}
+	result := make([]heatmapEntry, 0, len(dateCount))
+	for date, count := range dateCount {
+		result = append(result, heatmapEntry{Date: date, Count: count})
+	}
+
+	return c.JSON(fiber.Map{"data": result})
 }
 
 func (h *DashboardHandler) TagWeakness(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"data": []interface{}{}})
+	userIDStr := c.Locals("userId").(string)
+	userID, _ := uuid.Parse(userIDStr)
+
+	var handle string
+	h.db.Table("linked_accounts").Where("user_id = ? AND provider = ? AND is_connected = ?", userID, "codeforces", true).Select("handle").Scan(&handle)
+	if handle == "" {
+		return c.JSON(fiber.Map{"data": []interface{}{}})
+	}
+
+	subs, err := FetchCFSubmissions(handle, 500)
+	if err != nil {
+		return c.JSON(fiber.Map{"data": []interface{}{}})
+	}
+
+	// Count failed per tag
+	type tagStat struct {
+		Tag      string `json:"tag"`
+		Total    int    `json:"total"`
+		Failed   int    `json:"failed"`
+		PassRate float64 `json:"passRate"`
+	}
+	tagMap := make(map[string]*tagStat)
+
+	for _, sub := range subs {
+		for _, tag := range sub.Problem.Tags {
+			if _, ok := tagMap[tag]; !ok {
+				tagMap[tag] = &tagStat{Tag: tag}
+			}
+			tagMap[tag].Total++
+			if sub.Verdict != "OK" {
+				tagMap[tag].Failed++
+			}
+		}
+	}
+
+	// Sort by fail rate (worse first), take top 10
+	result := make([]tagStat, 0, len(tagMap))
+	for _, s := range tagMap {
+		if s.Total > 0 {
+			s.PassRate = float64(s.Total-s.Failed) / float64(s.Total) * 100
+		}
+		result = append(result, *s)
+	}
+
+	// Simple sort: most failed first
+	for i := 0; i < len(result); i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[j].Failed > result[i].Failed {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	if len(result) > 10 {
+		result = result[:10]
+	}
+
+	return c.JSON(fiber.Map{"data": result})
 }
 
 func (h *DashboardHandler) Health(c *fiber.Ctx) error {
