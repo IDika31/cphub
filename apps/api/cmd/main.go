@@ -47,6 +47,9 @@ func main() {
 	// Initialize grader queue
 	grader.InitQueue(cfg.Grader.MaxConcurrent)
 
+	// Startup check: verify compilers and firejail
+	_ = grader.StartupCheck()
+
 	// Repositories
 	_ = repository.NewUserRepository(db) // used by handlers via direct DB access
 	problemRepo := repository.NewProblemRepository(db)
