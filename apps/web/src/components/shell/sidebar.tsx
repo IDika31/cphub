@@ -1,25 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
-  Settings, Activity, Puzzle, LogOut, ChevronLeft,
-  ChevronDown,
+  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
-
-interface Provider {
-  name: string;
-  slug: string;
-  connected: boolean;
-}
-
-const MOCK_PROVIDERS: Provider[] = [
-  { name: "Codeforces", slug: "codeforces", connected: true },
-  { name: "TLX TOKI", slug: "tlx", connected: false },
-];
+import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
 
 interface NavItem {
   href: string;
@@ -43,6 +32,13 @@ export default function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(["problems"]));
+  const [providers, setProviders] = useState<LinkedAccount[]>([]);
+
+  useEffect(() => {
+    fetchConnections()
+      .then((res) => setProviders(res.data.filter((a) => a.isConnected)))
+      .catch(() => {});
+  }, []);
 
   function toggleMenu(href: string) {
     setExpandedMenus((prev) => {
@@ -53,12 +49,12 @@ export default function Sidebar() {
     });
   }
 
-  const connectedProviders = MOCK_PROVIDERS.filter((p) => p.connected);
-
   return (
     <aside className="w-[220px] bg-[#18181b] border-r border-[rgba(255,255,255,0.08)] flex flex-col flex-shrink-0 overflow-hidden">
       <div className="flex items-center justify-between px-[14px] h-[44px] border-b border-[rgba(255,255,255,0.08)]">
-        <span className="text-[16px] font-semibold text-[#8b5cf6]">CPHub</span>
+        <Link href="/dashboard" className="text-[16px] font-semibold text-[#8b5cf6]">
+          CPHub
+        </Link>
         <button className="text-[#52525b] hover:text-[#e4e4e7] p-1 rounded-[6px] hover:bg-[#1f1f23]">
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -88,36 +84,29 @@ export default function Sidebar() {
                 <item.icon className="w-4 h-4" />
                 <span className="flex-1">{item.label}</span>
                 {item.hasSubmenu && (
-                  <ChevronDown
-                    className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                  />
+                  <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                 )}
               </Link>
 
-              {/* Submenu — provider-based */}
-              {item.hasSubmenu && isExpanded && connectedProviders.length > 0 && (
+              {item.hasSubmenu && isExpanded && (
                 <div className="ml-[37px] mt-[1px] space-y-[1px]">
                   <Link
                     href={item.href}
                     className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                      pathname === item.href
-                        ? "text-[#8b5cf6]"
-                        : "text-[#71717a] hover:text-[#e4e4e7]"
+                      pathname === item.href ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
                     }`}
                   >
                     Semua
                   </Link>
-                  {connectedProviders.map((p) => (
+                  {providers.map((p) => (
                     <Link
-                      key={p.slug}
-                      href={`${item.href}?provider=${p.slug}`}
+                      key={p.provider}
+                      href={`${item.href}?provider=${p.provider}`}
                       className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                        pathname.includes(p.slug)
-                          ? "text-[#8b5cf6]"
-                          : "text-[#71717a] hover:text-[#e4e4e7]"
+                        pathname.includes(p.provider) ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
                       }`}
                     >
-                      {p.name}
+                      {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
                     </Link>
                   ))}
                 </div>
@@ -131,10 +120,10 @@ export default function Sidebar() {
         {user && (
           <div className="flex items-center gap-[9px] p-[6px_4px] rounded-[8px] cursor-pointer hover:bg-[#1f1f23] mb-[2px]">
             <div className="w-8 h-8 rounded-full bg-[#8b5cf6] text-white text-[11px] font-semibold flex items-center justify-center">
-              {user.name?.[0]?.toUpperCase() || "U"}
+              {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] text-[#e4e4e7] truncate">{user.name}</div>
+              <div className="text-[12px] text-[#e4e4e7] truncate">{user.name || user.email}</div>
               <div className="text-[11px] text-[#52525b] truncate">{user.email}</div>
             </div>
           </div>

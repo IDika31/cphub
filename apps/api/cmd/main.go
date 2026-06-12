@@ -65,6 +65,7 @@ func main() {
 	problemHandler := handler.NewProblemHandler(problemRepo)
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
 	dashboardHandler := handler.NewDashboardHandler()
+	accountHandler := handler.NewAccountHandler(db)
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
@@ -77,7 +78,7 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, cfg)
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -95,6 +96,7 @@ func registerRoutes(
 	problemHandler *handler.ProblemHandler,
 	submissionHandler *handler.SubmissionHandler,
 	dashboardHandler *handler.DashboardHandler,
+	accountHandler *handler.AccountHandler,
 	cfg *config.Config,
 ) {
 	// Health
@@ -130,6 +132,13 @@ func registerRoutes(
 	submissions := app.Group("/api/submissions", middleware.AuthRequired(cfg.JWT))
 	submissions.Get("/local", submissionHandler.ListLocal)
 	submissions.Get("/external", submissionHandler.ListExternal)
+
+	// Accounts
+	accounts := app.Group("/api/accounts", middleware.AuthRequired(cfg.JWT))
+	accounts.Get("/", accountHandler.List)
+	accounts.Delete("/:id", accountHandler.Unlink)
+	accounts.Post("/codeforces", accountHandler.LinkCodeforces)
+	accounts.Post("/tlx", accountHandler.LinkTLX)
 
 	// Dashboard
 	dashboard := app.Group("/api/dashboard", middleware.AuthRequired(cfg.JWT))
