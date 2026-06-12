@@ -7,7 +7,7 @@ import Badge from "@/components/ui/badge";
 import Skeleton from "@/components/ui/skeleton";
 import Modal from "@/components/ui/modal";
 import { fetchConnections, unlinkAccount, type LinkedAccount } from "@/lib/api/connections";
-import { API_BASE_URL } from "@/lib/api/client";
+import { apiClient } from "@/lib/api/client";
 
 interface ProviderRow {
   name: string;
@@ -26,10 +26,15 @@ export default function ConnectionsPage() {
     loadData();
   }, []);
 
-  function handleLink(provider: string) {
+  async function handleLink(provider: string) {
     switch (provider) {
-      case "codeforces":
-        window.open(`${API_BASE_URL}/api/auth/codeforces`, "_blank");
+      case "codeforces": {
+        try {
+          const res = await apiClient<{ redirectUrl: string }>("/api/accounts/codeforces", { method: "POST" });
+          window.location.href = res.redirectUrl;
+        } catch {}
+        break;
+      }
         break;
       case "tlx":
         setTlxModalOpen(true);
