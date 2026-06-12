@@ -71,11 +71,13 @@ func (h *AuthHandler) GoogleCallback(c *fiber.Ctx) error {
 }
 
 func (h *AuthHandler) GoogleLogin(c *fiber.Ctx) error {
-	// Redirect to Google OAuth consent screen
-	// This is a simplified redirect — real implementation uses OAuth2 config
+	// Uses config from .env via main.go route
+	clientID := c.Query("client_id")
+	redirectURI := c.Query("redirect_uri", "http://localhost:3001/api/auth/google/callback")
+
 	redirectURL := "https://accounts.google.com/o/oauth2/v2/auth" +
-		"?client_id=" + c.Query("client_id") +
-		"&redirect_uri=" + c.Query("redirect_uri", "http://localhost:3001/api/auth/google/callback") +
+		"?client_id=" + clientID +
+		"&redirect_uri=" + redirectURI +
 		"&response_type=code" +
 		"&scope=openid%20email%20profile"
 
