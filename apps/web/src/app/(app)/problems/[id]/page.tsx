@@ -14,6 +14,7 @@ import { fetchProblem } from "@/lib/api/problems";
 import { runCode, type GraderResult } from "@/lib/api/grader";
 import { getDefaultTemplate } from "@/lib/template";
 import { saveToLocalStorage, loadFromLocalStorage, debounce } from "@/lib/auto-save";
+import { apiClient } from "@/lib/api/client";
 import type { Problem } from "@/lib/api/types";
 
 const LANGUAGES = [
@@ -44,9 +45,10 @@ export default function ProblemDetailPage() {
     if (!id) return;
     setLoading(true);
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(id);
+    const token = getToken();
     const promise = isUuid
       ? fetchProblem(id)
-      : fetch('http://localhost:3001/api/problems/by-provider/codeforces/' + id).then(r => r.json());
+      : apiClient('/api/problems/by-provider/codeforces/' + id, { token });
     promise
       .then((p) => {
         setProblem(p);
