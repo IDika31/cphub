@@ -15,10 +15,13 @@ export default function MonacoEditor({
   value,
   language,
   onChange,
+  onRun,
   onMount,
 }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const onRunRef = useRef(onRun);
+  onRunRef.current = onRun;
 
   useEffect(() => {
     let disposed = false;
@@ -55,7 +58,7 @@ export default function MonacoEditor({
         label: "Run Code",
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
         run: () => {
-          onRun?.();
+          onRunRef.current?.();
         },
       });
 
