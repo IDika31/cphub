@@ -114,7 +114,7 @@ function ProblemsetContent() {
                         </div>
                       </td>
                       <td className="py-[10px] px-[14px]">
-                        {p.status === "solved" ? <Badge variant="verdict-ac">✓</Badge> : <Badge variant="verdict-pending">○</Badge>}
+                        {p.status === "solved" ? <Badge variant="verdict-ac">✓</Badge> : p.status === "synced" ? <Badge variant="cf">↻</Badge> : <Badge variant="verdict-pending">○</Badge>}
                       </td>
                     </tr>
                   );

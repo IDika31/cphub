@@ -53,14 +53,20 @@ chrome.commands.onCommand.addListener(async (command) => {
       const isTLX = url.includes("tlx.toki.id");
 
       if (isCF || isTLX) {
-        // Trigger sync in content script, then open CPHub
+        // Trigger sync first
         chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
-        // Wait briefly for sync to complete, then open problems page
+        // Extract CF problem ID from URL for direct editor link
+        const cfMatch = url.match(/codeforces\.com\/(?:contest|problemset)\/(?:problem\/)?(\d+)\/(\w+)/);
+        const cfId = cfMatch ? `${cfMatch[1]}${cfMatch[2]}` : "";
+        // Open CPHub — use provider filter so problem appears at top
+        const provider = isCF ? "codeforces" : "tlx";
+        const editorUrl = cfId
+          ? `http://localhost:3000/problems?provider=${provider}&q=${cfId}`
+          : `http://localhost:3000/problems?provider=${provider}`;
         setTimeout(() => {
-          chrome.tabs.create({ url: "http://localhost:3000/problems" });
-        }, 1500);
+          chrome.tabs.create({ url: editorUrl });
+        }, 2000);
       } else {
-        // Not on a problem page — just open dashboard
         chrome.tabs.create({ url: "http://localhost:3000/dashboard" });
       }
     });

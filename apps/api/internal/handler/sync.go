@@ -76,6 +76,7 @@ func (h *SyncHandler) SyncProblem(c *fiber.Ctx) error {
 		MemoryLimit: payload.MemoryLimit,
 		Tags:        payload.Tags,
 		URL:         payload.URL,
+		Status:      "synced",
 	}
 
 	// Set ID for new problems
