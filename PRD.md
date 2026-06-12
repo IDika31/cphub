@@ -455,11 +455,257 @@ Relasi dan index identik dengan V3.
 
 ## 7. Browser Extension
 
-(Sama dengan V3 — tidak ada perubahan signifikan)
+### 7.1 Overview
 
-Manifest V3, content script untuk CF dan TLX, HMAC-SHA256 signing, nonce anti-replay.
+Browser extension CPHub berfungsi sebagai jembatan antara halaman Codeforces / TLX TOKI di browser dengan CPHub API lokal. Extension melakukan scraping konten problem, submission, dan data user, lalu mengirimkannya ke API dengan HMAC authentication.
 
----
+### 7.2 Tech Stack
+
+| Komponen | Teknologi |
+|----------|-----------|
+| Runtime / Package Manager | **Bun** |
+| Manifest | **V3** (service worker, no background page) |
+| Build | **Vite** + TypeScript (multi-entry) |
+| UI (Popup & Options) | React + TailwindCSS (dark theme #0f0f10) |
+| Storage | `chrome.storage.local` + `chrome.storage.sync` |
+| Messaging | `chrome.runtime.sendMessage` typed message bus |
+
+### 7.3 Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Browser Extension               │
+│                                                 │
+│  ┌──────────────┐  ┌─────────────────────────┐  │
+│  │ Content      │  │ Background SW           │  │
+│  │ Scripts      │  │ (service-worker.ts)     │  │
+│  │              │  │                         │  │
+│  │ detector.ts  │  │ Message handler         │  │
+│  │ codeforces.ts│  │ Sync orchestrator       │  │
+│  │ tlx.ts       │  │ HMAC signer             │  │
+│  │ observer.ts  │  │ Offline queue           │  │
+│  │ selectors/   │  │ Rate limiter            │  │
+│  │              │  │ Badge manager           │  │
+│  │              │  │ Notification manager    │  │
+│  │              │  │ Alarm (health ping)     │  │
+│  └──────────────┘  └─────────────────────────┘  │
+│                                                 │
+│  ┌──────────────┐  ┌─────────────────────────┐  │
+│  │ Popup        │  │ Options Page            │  │
+│  │              │  │                         │  │
+│  │ Sync tab     │  │ HMAC key management     │  │
+│  │ Status tab   │  │ Connection test         │  │
+│  │ Settings tab │  │ API base URL config     │  │
+│  └──────────────┘  └─────────────────────────┘  │
+│                                                 │
+│  ┌──────────────────────────────────────────┐   │
+│  │ Shared                                   │   │
+│  │ crypto.ts / nonce.ts / api.ts            │   │
+│  │ logger.ts / storage.ts / messages.ts     │   │
+│  └──────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+```
+
+### 7.4 Content Scripts — Scrapers
+
+#### 7.4.1 Platform Support
+
+| Platform | Problem | Submission | Profile | Session |
+|----------|---------|------------|---------|---------|
+| Codeforces | ✓ title, statement, I/O, constraints, tags, time/memory limit | ✓ verdict, runtime, memory, language, timestamp | ✓ handle, rating, max rating, avatar | — |
+| TLX TOKI | ✓ title, statement (Markdown), I/O, constraints, tags | ✓ verdict, runtime, memory, language, timestamp | — | ✓ cookie-based session detection |
+
+#### 7.4.2 Auto-Detection
+
+- `detector.ts` mendeteksi URL pattern CF problem page (`codeforces.com/problemset/problem/*`, `codeforces.com/contest/*/problem/*`) dan TLX problem page (`tlx.toki.id/problems/*`)
+- Auto-deteksi submission page URL untuk scraping submission history
+- DOM Mutation Observer untuk navigasi SPA (CF dan TLX render client-side — React/Next.js)
+
+#### 7.4.3 Versioned Selector Registry
+
+- Selector per platform disimpan dalam registry terpisah (`selectors/codeforces.ts`, `selectors/tlx.ts`)
+- Setiap versi selector punya fallback chain — jika selector A gagal, coba selector B
+- Auto-log saat selector gagal → trigger review manual
+- User bisa kirim report "scraper broken" via popup
+
+### 7.5 Background Service Worker
+
+#### 7.5.1 Lifecycle
+
+- `install` event: inisialisasi storage, register alarm
+- `activate` event: claim clients, bersihkan stale data
+- Keep-alive via periodic ping setiap 5 menit (alarm API)
+- Graceful shutdown: flush offline queue sebelum terminate
+
+#### 7.5.2 Sync Orchestrator
+
+```
+Content Script scrape page
+        │
+        ▼
+Background SW receive scrape result
+        │
+        ├─ Validate data completeness
+        ├─ Sign payload with HMAC-SHA256
+        ├─ Generate nonce (timestamp-based, Redis-checked server-side)
+        ├─ POST to local CPHub API (port 3001)
+        │     │
+        │     ├─ 200 OK → update badge (green count), notify success
+        │     ├─ 4xx/5xx → push to offline queue, notify error
+        │     └─ Network error → push to offline queue
+        │
+        ▼
+Return status to content script → DOM update (success indicator)
+```
+
+#### 7.5.3 Offline Queue
+
+- Failed sync disimpan di `chrome.storage.local`
+- Retry dengan exponential backoff (1s, 2s, 4s, 8s, max 60s)
+- Maks 50 item dalam queue
+- Queue diproses FIFO — auto-retry saat online terdeteksi
+- Badge menampilkan queue count (orange jika ada pending)
+
+#### 7.5.4 Rate Limiter
+
+- Maks 1 sync request per detik
+- Token bucket algorithm — burst max 3
+- Queue overflow → warning di popup
+
+#### 7.5.5 Notifications
+
+- Chrome native notification (`chrome.notifications.create`)
+- Tipe: sync sukses (problem title), sync error (reason), extension update available
+- Notification action: click → buka CPHub web dashboard / popup
+- User bisa disable per tipe notifikasi di options page
+
+#### 7.5.6 Badge
+
+- Badge text: jumlah problem tersinkron sesi ini (atau "!" jika error)
+- Badge color: green (OK), orange (queue pending), red (error/lost connection)
+- Reset badge count setiap hari (atau manual via popup)
+
+### 7.6 Popup UI
+
+#### 7.6.1 Layout
+
+- **Header:** Logo CPHub + versi extension + dark/light toggle
+- **Tab bar:** Sync | Status | Settings (3 tab)
+- **Footer:** link ke CPHub dashboard + report bug
+
+#### 7.6.2 Sync Tab
+
+- "Sync This Problem" button (primary, full width) — hanya aktif jika tab aktif adalah halaman CF/TLX
+- Last sync info: problem title + timestamp + status (success/fail)
+- Recent sync list: 5 sync terakhir dengan icon status
+- Manual sync all pending button
+
+#### 7.6.3 Status Tab
+
+- API connection status: dot indicator (green/red) + latency ms
+- HMAC key status: configured / not configured
+- Offline queue: count + list
+- Last health ping timestamp
+- Extension version + check update
+
+#### 7.6.4 Settings Tab
+
+- API base URL input (default: `http://localhost:3001`)
+- HMAC secret input (masked, with show/hide toggle)
+- Sync mode: Auto (detect page) / Manual (button only)
+- Notification preferences (on/off per type)
+- Reset extension data button
+
+### 7.7 Options Page
+
+Full-page settings diakses via `chrome://extensions` → "Extension Options" atau right-click icon → "Options".
+
+- **HMAC Key Management:**
+  - Generate new key (random 256-bit hex)
+  - Input manual key (copy-paste dari CPHub settings)
+  - Rotate key — simpan 2 key lama untuk grace period
+  - Validate key — test sign + ping ke API
+- **Connection Test:**
+  - Ping API endpoint → tampilkan latency, status code, response time
+  - Test HMAC auth → tampilkan valid/invalid
+- **Data Management:**
+  - Export settings JSON
+  - Import settings JSON
+  - Clear all local data
+
+### 7.8 Keyboard Shortcuts
+
+| Shortcut | Action | Manifest Key |
+|----------|--------|--------------|
+| `Ctrl+Shift+S` / `Cmd+Shift+S` | Sync current problem | `sync-current-problem` |
+| `Ctrl+Shift+O` / `Cmd+Shift+O` | Open CPHub dashboard | `open-dashboard` |
+
+Dikonfigurasi di `manifest.json` → `commands` — user bisa rebind di `chrome://extensions/shortcuts`.
+
+### 7.9 Context Menu
+
+Right-click pada halaman CF/TLX:
+
+- **"Sync this problem to CPHub"** — trigger scrape + sync (sama seperti button)
+- **"Sync all problems on this page"** — untuk problem listing page (CF problemset)
+- Context menu hanya muncul jika URL match dengan pattern CF/TLX
+
+Didaftarkan via `chrome.contextMenus.create` di background SW.
+
+### 7.10 Security
+
+| Layer | Implementasi |
+|-------|-------------|
+| CSP | `script-src 'self'` — no eval, no inline scripts |
+| HMAC | SHA256 HMAC signature setiap request ke API |
+| Nonce | Timestamp-based nonce, server verify anti-replay via Redis |
+| Secret Storage | `chrome.storage.local` — tidak expose ke web pages |
+| Content Script Isolation | `world: "ISOLATED"` — tidak bisa diakses page JS |
+| Permissions | Minimal: `storage`, `alarms`, `notifications`, `contextMenus` |
+| Host Permissions | Scoped: `https://codeforces.com/*`, `https://tlx.toki.id/*`, `http://localhost:3001/*` |
+
+### 7.11 Build & Distribution
+
+#### 7.11.1 Development
+
+```bash
+cd apps/extension && bun dev
+# Vite watch mode — rebuild on change
+# Load unpacked extension dari dist/ di chrome://extensions
+```
+
+- Hot reload content script via `chrome.runtime.reload()`
+- Source map enabled di dev mode
+- Logger verbose di dev, silent di production
+
+#### 7.11.2 Production Build
+
+```bash
+cd apps/extension && bun run build
+# Output: apps/extension/dist/ (unpacked) + dist.zip (Chrome Web Store)
+```
+
+- Minify + tree-shake
+- Remove source maps
+- Auto-bump version dari `package.json` ke `manifest.json`
+
+#### 7.11.3 Chrome Web Store
+
+- Listing assets: screenshot (1280x800), promo tiles, description, privacy policy
+- Auto-publish via Chrome Web Store API (CI/CD optional)
+- Version changelog di store listing
+
+### 7.12 Error Handling
+
+| Skenario | Handling |
+|----------|----------|
+| Scraper gagal (DOM berubah) | Fallback selector chain → log → tampilkan "scraper broken" di popup |
+| API unreachable | Retry 3x → offline queue → badge red → notification |
+| HMAC key not configured | Popup settings tab: prompt user input key dari CPHub settings |
+| Rate limit exceeded | Queue request → tampilkan estimasi wait time |
+| Chrome storage full | Hapus log lama → warning ke user |
+| Service worker terminated | Alarm keep-alive — restart + reprocess queue |
+| CSP block | Build-time check — no eval, no inline |
 
 ## 8. Code Editor & Template System
 
