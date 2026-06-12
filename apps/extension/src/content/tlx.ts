@@ -57,3 +57,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 logger.info("TLX content script loaded");
+
+(function autoSync() {
+  const detected = detectPageType();
+  if (detected.isProblem && detected.provider === "tlx") {
+    setTimeout(() => {
+      const data = scrapeProblem();
+      if (data) {
+        chrome.runtime.sendMessage({
+          type: MESSAGE_TYPES.SYNC_PROBLEM,
+          payload: {
+            provider: "tlx",
+            type: "problem",
+            url: window.location.href,
+            data,
+          },
+        });
+        logger.info("Auto-synced TLX problem:", data.title);
+      }
+    }, 1500);
+  }
+})();
