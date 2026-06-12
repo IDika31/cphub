@@ -28,16 +28,16 @@ export async function syncToAPI(payload: SyncPayload): Promise<SyncResponse> {
   }
 
   const body = JSON.stringify(payload);
-  const signature = await generateHMAC(body, hmacSecret);
-  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-  // Route to correct backend endpoint based on type
   const endpoint = payload.type === "problem" ? "/api/sync/problem" : "/api/sync/submission";
 
   let retries = 3;
   let lastError: Error | null = null;
 
   while (retries > 0) {
+    // Generate fresh nonce + signature per retry
+    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const signature = await generateHMAC(body, hmacSecret);
+
     try {
       const res = await fetch(`${apiUrl}${endpoint}`, {
         method: "POST",
