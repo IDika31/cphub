@@ -1,0 +1,18 @@
+[Unit]
+Description=CPHub V4 Web Dashboard
+After=network.target cphub-api.service
+Requires=cphub-api.service
+
+[Service]
+Type=simple
+User=cphub
+WorkingDirectory=/opt/cphub/apps/web
+ExecStart=/usr/bin/bun run dev -p 3000
+ExecStop=/bin/kill -SIGTERM $MAINPID
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=NEXT_PUBLIC_API_URL=http://localhost:3001
+
+[Install]
+WantedBy=multi-user.target

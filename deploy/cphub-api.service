@@ -1,0 +1,20 @@
+[Unit]
+Description=CPHub V4 API Server
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=cphub
+WorkingDirectory=/opt/cphub/apps/api
+ExecStart=/usr/bin/go run ./cmd/main.go
+ExecStop=/bin/kill -SIGTERM $MAINPID
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/cphub/.env
+LimitNOFILE=4096
+LimitNPROC=100
+OOMScoreAdjust=-100
+
+[Install]
+WantedBy=multi-user.target
