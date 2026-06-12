@@ -1,7 +1,7 @@
 [Unit]
 Description=CPHub V4 API Server
-After=network.target docker.service
-Requires=docker.service
+After=network.target postgresql.service redis.service
+Requires=postgresql.service redis.service
 
 [Service]
 Type=simple

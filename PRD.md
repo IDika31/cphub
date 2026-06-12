@@ -182,8 +182,8 @@ Platform terintegrasi dan *local-first* untuk latihan competitive programming ya
 | Web Framework | Fiber v2 |
 | ORM | GORM |
 | Migration | golang-migrate |
-| Database | PostgreSQL 16 (Docker) |
-| Cache | Redis 7 (Docker) |
+| Database | PostgreSQL 16 (native) |
+| Cache | Redis 7 (native) |
 | Grader | **Native Arch Linux CachyOS** — GCC 14+, Python 3.12+, Node.js 22+, Java 21+ |
 | Sandbox | firejail |
 | Auth | golang-jwt, bcrypt, Google OAuth 2.0 |
@@ -231,9 +231,7 @@ Root `package.json` menggunakan **Bun** sebagai package manager dan task runner:
     "dev:ext": "cd apps/extension && bun dev",
     "build:web": "cd apps/web && bun run build",
     "build:ext": "cd apps/extension && bun run build",
-    "db:migrate": "cd apps/api && go run ./cmd/migrate.go",
-    "infra:up": "docker compose -f docker/docker-compose.yml up -d",
-    "infra:down": "docker compose -f docker/docker-compose.yml down"
+    "db:migrate": "cd apps/api && go run ./cmd/migrate/main.go"
   }
 }
 ```
@@ -256,49 +254,24 @@ Redis 7
 Web Dashboard (Next.js, port 3000)
 ```
 
-### 5.5 Docker Services
+### 5.5 Infrastructure Services
 
-Hanya 2 service — PostgreSQL 16 dan Redis 7. Piston sudah dihapus.
+PostgreSQL 16 dan Redis 7 dijalankan **native** di host (Arch Linux CachyOS). Tidak ada Docker — semua layanan berjalan langsung di sistem operasi.
 
-```yaml
-# docker-compose.yml — root monorepo
-services:
-  db:
-    image: postgres:16-alpine
-    container_name: cphub-db
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: cphub
-      POSTGRES_PASSWORD: cphub
-      POSTGRES_DB: cphub
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cphub"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+```bash
+# Install services
+sudo pacman -S postgresql redis
 
-  cache:
-    image: redis:7-alpine
-    container_name: cphub-cache
-    ports:
-      - "6379:6379"
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+# Start services
+sudo systemctl enable --now postgresql redis
 
-volumes:
-  pgdata:
-  redisdata:
+# Setup database
+sudo -u postgres createuser cphub
+sudo -u postgres psql -c "ALTER USER cphub PASSWORD 'cphub'; ALTER USER cphub CREATEDB;"
+sudo -u postgres createdb cphub -O cphub
 ```
 
-**Piston tidak lagi digunakan.** Grader berjalan langsung di host Arch Linux CachyOS dengan kompiler native. Docker hanya untuk PostgreSQL dan Redis.
+Setup otomatis via `deploy/setup-firejail.sh` yang juga menginstall firejail dan system limits.
 
 ### 5.6 Icon System
 
@@ -1487,32 +1460,37 @@ Scrollbar styling tetap di `globals.css` (Tailwind tidak support pseudo-elements
 - **Arch Linux CachyOS** (atau Arch Linux turunan)
 - Go 1.22+
 - Node.js 20+ (Bun)
-- Docker dan Docker Compose (untuk PostgreSQL & Redis)
 - **GCC 14+, Python 3.12+, Node.js 22+, JDK 21+** (untuk grader)
 - **firejail** (untuk sandbox)
+- **PostgreSQL 16, Redis 7** (native)
 
 ### 17.2 Setup Awal
 
 1. Clone repository
-2. Copy `.env.example` ke `.env.local`
+2. Copy `.env.example` ke `.env`
 3. Install system dependencies:
    ```bash
-   sudo pacman -S gcc python nodejs jdk21-openjdk firejail
+   sudo pacman -S gcc python nodejs jdk21-openjdk firejail postgresql redis
    ```
-4. Jalankan Docker services: `docker compose up -d` (PostgreSQL + Redis)
-5. Jalankan migrasi database
-6. Jalankan API: `go run ./apps/api/cmd/main.go`
-7. Jalankan frontend: `bun dev` dari `apps/web`
+4. Setup database:
+   ```bash
+   sudo -u postgres createuser cphub
+   sudo -u postgres psql -c "ALTER USER cphub PASSWORD 'cphub'; ALTER USER cphub CREATEDB;"
+   sudo -u postgres createdb cphub -O cphub
+   ```
+5. Setup firejail: `sudo bash deploy/setup-firejail.sh`
+6. Jalankan migrasi database: `bun run db:migrate`
+7. Jalankan API: `go run ./apps/api/cmd/main.go`
+8. Jalankan frontend: `bun dev` dari `apps/web`
 
 ### 17.3 Script Utama
 
 | Script | Aksi |
 |--------|------|
-| `infra:up` | Jalankan Docker services (PostgreSQL + Redis) |
-| `infra:down` | Hentikan Docker services |
 | `dev:api` | Jalankan Go API server |
 | `dev:web` | Jalankan Next.js dev server |
 | `test:api` | Jalankan semua test Go (termasuk grader native) |
+| `db:migrate` | Jalankan database migration |
 
 ---
 
@@ -1521,7 +1499,7 @@ Scrollbar styling tetap di `globals.css` (Tailwind tidak support pseudo-elements
 ### Phase 1 — Foundation (Minggu 1–3)
 
 - Auth: Email/password + Google OAuth (Go backend)
-- Database schema + Docker (PostgreSQL, Redis)
+- Database schema (PostgreSQL + Redis native)
 - Extension scaffold + basic Codeforces scraper
 - Problem sync endpoint dengan HMAC verification
 - Editor dasar: Monaco + substitusi template

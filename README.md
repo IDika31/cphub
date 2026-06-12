@@ -8,8 +8,8 @@ Platform *local-first* untuk latihan competitive programming. Integrasi workflow
 |-------|-----------|
 | Backend API (port 3001) | Go 1.22+, Fiber v2, GORM, golang-migrate |
 | Frontend (port 3000) | Next.js 14 (App Router), TypeScript, Bun, TailwindCSS |
-| Database | PostgreSQL 16 (Docker) |
-| Cache/Queue | Redis 7 (Docker) |
+| Database | PostgreSQL 16 (native) |
+| Cache/Queue | Redis 7 (native) |
 | Grader | Native GCC 14+, Python 3.12+, Node.js 22+, Java 21+ |
 | Sandbox | firejail |
 | Extension | Chrome Manifest V3, Vite + TypeScript |
@@ -17,7 +17,9 @@ Platform *local-first* untuk latihan competitive programming. Integrasi workflow
 ## Prerequisites
 
 - **Arch Linux** (CachyOS preferred)
-- Go 1.22+, Bun, Docker, Docker Compose
+- Go 1.22+, Bun
+- PostgreSQL 16 (native)
+- Redis 7 (native)
 - GCC 14+, Python 3.12+, Node.js 22+, JDK 21+
 - firejail
 
@@ -25,25 +27,30 @@ Platform *local-first* untuk latihan competitive programming. Integrasi workflow
 
 ```bash
 # 1. Install system dependencies
-sudo pacman -S gcc python nodejs jdk21-openjdk firejail
+sudo pacman -S gcc python nodejs jdk21-openjdk firejail postgresql redis
 
-# 2. Copy environment config
+# 2. Setup firejail
+sudo bash deploy/setup-firejail.sh
+
+# 3. Setup database
+sudo -u postgres createuser cphub
+sudo -u postgres psql -c "ALTER USER cphub PASSWORD 'cphub'; ALTER USER cphub CREATEDB;"
+sudo -u postgres createdb cphub -O cphub
+
+# 4. Setup environment
 cp .env.example .env
-# Edit .env — set JWT_SECRET, EXTENSION_HMAC_SECRET, OAuth credentials
+# Edit .env — set JWT_SECRET, EXTENSION_HMAC_SECRET
 
-# 3. Start infrastructure
-bun run infra:up
-
-# 4. Run database migrations
+# 5. Run migrations
 bun run db:migrate
 
-# 5. Start API (terminal 1)
+# 6. Start API (terminal 1)
 bun run dev:api
 
-# 6. Start frontend (terminal 2)
+# 7. Start frontend (terminal 2)
 bun run dev:web
 
-# 7. Start extension dev (terminal 3, optional)
+# 8. Start extension dev (terminal 3, optional)
 bun run dev:ext
 ```
 
@@ -58,7 +65,8 @@ competitive-hub-v4/
 │   ├── web/           # Next.js frontend
 │   └── extension/     # Browser extension
 ├── plans/             # Implementation plans per track
-├── docker-compose.yml # PostgreSQL + Redis
+├── docs/              # Developer + user documentation
+├── deploy/            # Systemd services, cron, firejail
 └── package.json       # Root workspace (Bun)
 ```
 

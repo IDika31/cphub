@@ -10,7 +10,7 @@
 
 | File | Track | Task Count | Done |
 |------|-------|------------|------|
-| [00-infrastructure.md](00-infrastructure.md) | Monorepo, Docker, Config | 7 | 5 |
+| [00-infrastructure.md](00-infrastructure.md) | Monorepo, Native Services, Config | 7 | 5 |
 | [01-backend.md](01-backend.md) | Go API | 55 | 52 |
 | [02-frontend.md](02-frontend.md) | Next.js Web App | 60 | 58 |
 | [03-extension.md](03-extension.md) | Browser Extension | 43 | 37 |
