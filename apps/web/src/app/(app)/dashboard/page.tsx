@@ -22,11 +22,12 @@ export default function DashboardPage() {
       <Topbar title="Dashboard" />
       <div className="flex-1 overflow-y-auto p-[14px]">
         {/* Overview Cards */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-4 gap-3 mb-4">
           {[
             { label: "Solved", value: loading ? "..." : String(data?.solved ?? 0) },
             { label: "Streak", value: loading ? "..." : `${data?.streak ?? 0} hari` },
-            { label: "Accuracy", value: loading ? "..." : `${data?.accuracy ?? 0}%` },
+            { label: "Accuracy", value: loading ? "..." : `${Math.round(data?.accuracy ?? 0)}%` },
+            { label: "CF Rating", value: loading ? "..." : data?.cfHandle ? String(data.cfRating) : "—" },
           ].map((card) => (
             <div
               key={card.label}
@@ -36,6 +37,9 @@ export default function DashboardPage() {
               <div className="text-[24px] font-semibold text-[#e4e4e7]">
                 {card.value}
               </div>
+              {card.label === "CF Rating" && data?.cfHandle && (
+                <div className="text-[11px] text-[#60a5fa] mt-1">{data.cfHandle}</div>
+              )}
             </div>
           ))}
         </div>

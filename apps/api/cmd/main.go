@@ -64,7 +64,7 @@ func main() {
 	syncHandler := handler.NewSyncHandler(problemRepo, submissionRepo)
 	problemHandler := handler.NewProblemHandler(problemRepo)
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
-	dashboardHandler := handler.NewDashboardHandler()
+	dashboardHandler := handler.NewDashboardHandler(db)
 	accountHandler := handler.NewAccountHandler(db, cfg.CF.ClientID, cfg.CF.ClientSecret, cfg.CF.RedirectURL)
 	settingsHandler := handler.NewSettingsHandler(db)
 	snippetHandler := handler.NewSnippetHandler(db)

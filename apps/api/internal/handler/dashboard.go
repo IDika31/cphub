@@ -3,22 +3,56 @@ package handler
 import (
 	"github.com/IDika31/cphub/api/internal/database"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-type DashboardHandler struct{}
+type DashboardHandler struct {
+	db *gorm.DB
+}
 
-func NewDashboardHandler() *DashboardHandler {
-	return &DashboardHandler{}
+func NewDashboardHandler(db *gorm.DB) *DashboardHandler {
+	return &DashboardHandler{db: db}
 }
 
 func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
-	// TODO: Real analytics from DB
-	// For now return mock structure
+	userIDStr := c.Locals("userId").(string)
+	userID, _ := uuid.Parse(userIDStr)
+
+	var solved int64
+	h.db.Table("problems").Where("status = ?", "solved").Count(&solved)
+
+	var attempted int64
+	h.db.Table("problem_logs").Where("user_id = ? AND action = ?", userID, "attempted").
+		Distinct("problem_id").Count(&attempted)
+
+	var streak int64
+	h.db.Table("problem_logs").Where("user_id = ?", userID).
+		Select("COUNT(DISTINCT DATE(timestamp))").Scan(&streak)
+
+	var totalLogs int64
+	h.db.Table("problem_logs").Where("user_id = ?", userID).Count(&totalLogs)
+
+	accuracy := 0.0
+	if totalLogs > 0 {
+		var solvedLogs int64
+		h.db.Table("problem_logs").Where("user_id = ? AND action = ?", userID, "solved").Count(&solvedLogs)
+		accuracy = float64(solvedLogs) / float64(totalLogs) * 100
+	}
+
+	var cfRating int
+	var cfHandle string
+	h.db.Table("linked_accounts").
+		Where("user_id = ? AND provider = ? AND is_connected = ?", userID, "codeforces", true).
+		Select("rating, handle").Row().Scan(&cfRating, &cfHandle)
+
 	return c.JSON(fiber.Map{
-		"solved":   0,
-		"attempted": 0,
-		"streak":    0,
-		"accuracy":  0.0,
+		"solved":    solved,
+		"attempted": attempted,
+		"streak":    streak,
+		"accuracy":  accuracy,
+		"cfHandle":  cfHandle,
+		"cfRating":  cfRating,
 	})
 }
 
