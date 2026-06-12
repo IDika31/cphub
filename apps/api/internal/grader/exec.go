@@ -51,12 +51,6 @@ func Run(ctx context.Context, lang Language, td *TempDir, input string) (*Execut
 	cmd.Dir = td.Path
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	// Resource limits
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-		Rlimit:  &syscall.Rlimit{Cur: 512 * 1024 * 1024, Max: 512 * 1024 * 1024}, // 512 MB
-	}
-
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
