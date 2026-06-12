@@ -69,6 +69,13 @@
         "mac": "Command+Shift+O"
       },
       "description": "Open CPHub dashboard"
+    },
+    "open-editor": {
+      "suggested_key": {
+        "default": "Alt+C",
+        "mac": "Alt+C"
+      },
+      "description": "Open current problem in CPHub editor"
     }
   },
   "content_security_policy": {

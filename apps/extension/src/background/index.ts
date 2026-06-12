@@ -45,6 +45,24 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command === "open-dashboard") {
     chrome.tabs.create({ url: "http://localhost:3000" });
   }
+  if (command === "open-editor") {
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (!tab?.url) return;
+      const url = tab.url;
+      let editorUrl = "http://localhost:3000/problems";
+      // Extract CF problem: /contest/123/problem/A or /problemset/problem/123/A
+      const cfMatch = url.match(/codeforces\.com\/(?:contest|problemset)\/(?:problem\/)?(\d+)\/(\w+)/);
+      if (cfMatch) {
+        editorUrl = `http://localhost:3000/problems?cf=${cfMatch[1]}${cfMatch[2]}`;
+      }
+      // Extract TLX problem: /problems/xxx
+      const tlxMatch = url.match(/tlx\.toki\.id\/problems\/([^/?]+)/);
+      if (tlxMatch) {
+        editorUrl = `http://localhost:3000/problems?tlx=${tlxMatch[1]}`;
+      }
+      chrome.tabs.create({ url: editorUrl });
+    });
+  }
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
