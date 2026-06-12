@@ -95,7 +95,7 @@ function SidebarInner() {
                   <Link
                     href={item.href}
                     className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                      pathname === item.href ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
+                      pathname === item.href && !providerParam ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
                     }`}
                   >
                     Semua
@@ -105,7 +105,7 @@ function SidebarInner() {
                       key={p.provider}
                       href={`${item.href}?provider=${p.provider}`}
                       className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                        providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
+                        pathname.startsWith(item.href) && providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
                       }`}
                     >
                       {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
