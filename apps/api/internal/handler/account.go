@@ -61,7 +61,6 @@ func (h *AccountHandler) LinkCodeforces(c *fiber.Ctx) error {
 		"?response_type=code" +
 		"&client_id=" + h.cfClientID +
 		"&redirect_uri=" + h.cfRedirectURL +
-		"&scope=read" +
 		"&state=" + state
 
 	return c.JSON(fiber.Map{
