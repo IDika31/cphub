@@ -48,7 +48,7 @@ func main() {
 	grader.InitQueue(cfg.Grader.MaxConcurrent)
 
 	// Repositories
-	userRepo := repository.NewUserRepository(db)
+	_ = repository.NewUserRepository(db) // used by handlers via direct DB access
 	problemRepo := repository.NewProblemRepository(db)
 	submissionRepo := repository.NewSubmissionRepository(db)
 
