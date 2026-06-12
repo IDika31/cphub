@@ -65,7 +65,7 @@ func (r *ProblemRepository) FindByID(id uuid.UUID) (*model.Problem, error) {
 
 func (r *ProblemRepository) FindByProviderAndID(provider, problemID string) (*model.Problem, error) {
 	var p model.Problem
-	err := r.db.Where("provider = ? AND problem_id = ?", provider, problemID).First(&p).Error
+	err := r.db.Where("provider = ? AND problem_id = ?", provider, problemID).Preload("TestCases").First(&p).Error
 	if err != nil { return nil, err }
 	return &p, nil
 }
