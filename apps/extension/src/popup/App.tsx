@@ -1,123 +1,166 @@
 import { useState, useEffect } from "react";
-import { MESSAGE_TYPES } from "../shared/messages";
 import { pingAPI } from "../shared/api";
-import { getSetting, getSyncedCount } from "../shared/storage";
+import { getSyncedCount } from "../shared/storage";
+import { MESSAGE_TYPES } from "../shared/messages";
 
 type Tab = "sync" | "status" | "settings";
 
+const styles = {
+  container: {
+    display: "flex",
+    flexDirection: "column" as const,
+    minHeight: 400,
+    background: "#0f0f10",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0 12px",
+    height: 40,
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    background: "#18181b",
+  },
+  logo: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#8b5cf6",
+  },
+  statusDot: (ok: boolean) => ({
+    fontSize: 10,
+    color: ok ? "#10b981" : "#ef4444",
+  }),
+  tabBar: {
+    display: "flex",
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    background: "#18181b",
+  },
+  tab: (active: boolean) => ({
+    flex: 1,
+    height: 32,
+    border: "none",
+    borderBottom: active ? "2px solid #8b5cf6" : "2px solid transparent",
+    background: "transparent",
+    color: active ? "#8b5cf6" : "#71717a",
+    fontSize: 11,
+    fontWeight: 500,
+    cursor: "pointer",
+  }),
+  content: {
+    flex: 1,
+    padding: 12,
+  },
+  button: (primary?: boolean) => ({
+    width: "100%",
+    padding: "8px 0",
+    borderRadius: 6,
+    border: "none",
+    background: primary ? "#8b5cf6" : "#1f1f23",
+    color: primary ? "#fff" : "#e4e4e7",
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: "pointer",
+    borderBottom: primary ? "none" : "1px solid rgba(255,255,255,0.08)",
+  }),
+  input: {
+    width: "100%",
+    padding: "6px 8px",
+    borderRadius: 4,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "#1f1f23",
+    color: "#e4e4e7",
+    fontSize: 12,
+    outline: "none",
+  },
+  label: {
+    display: "block" as const,
+    fontSize: 11,
+    color: "#71717a",
+    marginBottom: 4,
+  },
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 12,
+  },
+} as const;
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("sync");
-  const [status, setStatus] = useState<{ apiOk: boolean; latencyMs: number; syncedCount: number }>({
-    apiOk: false,
-    latencyMs: 0,
-    syncedCount: 0,
-  });
-
-  useEffect(() => {
-    loadStatus();
-  }, []);
+  const [apiOk, setApiOk] = useState(false);
+  const [latency, setLatency] = useState(0);
+  const [syncedCount, setSyncedCount] = useState(0);
 
   async function loadStatus() {
     try {
       const res = await pingAPI();
+      setApiOk(res.status === "ok");
+      setLatency(res.latencyMs);
       const count = await getSyncedCount();
-      setStatus({ apiOk: res.status === "ok", latencyMs: res.latencyMs, syncedCount: count });
+      setSyncedCount(count);
     } catch {
-      setStatus((s) => ({ ...s, apiOk: false }));
+      setApiOk(false);
+    }
+  }
+
+  useEffect(() => { loadStatus(); }, []);
+
+  async function handleSync() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
+      window.close();
     }
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 h-10 border-b border-[rgba(255,255,255,0.08)] bg-[#18181b]">
-        <span className="text-[13px] font-semibold text-[#8b5cf6]">CPHub</span>
-        <span className="text-[10px] text-[#52525b]">
-          {status.apiOk ? (
-            <span className="text-[#10b981]">● Connected</span>
-          ) : (
-            <span className="text-[#ef4444]">● Offline</span>
-          )}
-        </span>
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <span style={styles.logo}>CPHub</span>
+        <span style={styles.statusDot(apiOk)}>{apiOk ? "● Connected" : "● Offline"}</span>
       </div>
 
-      {/* Tab Bar */}
-      <div className="flex border-b border-[rgba(255,255,255,0.08)] bg-[#18181b]">
+      <div style={styles.tabBar}>
         {(["sync", "status", "settings"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 h-8 text-[11px] font-medium transition-colors ${
-              tab === t
-                ? "text-[#8b5cf6] border-b-2 border-[#8b5cf6]"
-                : "text-[#71717a] hover:text-[#e4e4e7] border-b-2 border-transparent"
-            }`}
-          >
+          <button key={t} style={styles.tab(tab === t)} onClick={() => setTab(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 p-3">
+      <div style={styles.content}>
         {tab === "sync" && (
-          <div className="space-y-3">
-            <button
-              className="w-full py-2 rounded-[6px] text-[12px] font-medium bg-[#8b5cf6] text-white hover:bg-[#7c3aed] transition-colors"
-              onClick={async () => {
-                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-                if (tab?.id) {
-                  chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
-                }
-              }}
-            >
-              Sync This Problem
-            </button>
-            <div className="text-[11px] text-[#71717a]">
-              {status.syncedCount > 0
-                ? `${status.syncedCount} problems synced this session`
-                : "No problems synced yet"}
+          <div>
+            <button style={styles.button(true)} onClick={handleSync}>Sync This Problem</button>
+            <div style={{ marginTop: 12, ...styles.row, color: "#71717a", fontSize: 11 }}>
+              {syncedCount > 0 ? `${syncedCount} problems synced` : "No problems synced yet"}
             </div>
           </div>
         )}
 
         {tab === "status" && (
-          <div className="space-y-2 text-[12px]">
-            <div className="flex justify-between">
-              <span className="text-[#71717a]">API</span>
-              <span className={status.apiOk ? "text-[#10b981]" : "text-[#ef4444]"}>
-                {status.apiOk ? `${status.latencyMs}ms` : "Offline"}
-              </span>
+          <div>
+            <div style={{ ...styles.row, marginBottom: 8 }}>
+              <span style={{ color: "#71717a" }}>API</span>
+              <span style={{ color: apiOk ? "#10b981" : "#ef4444" }}>{apiOk ? `${latency}ms` : "Offline"}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-[#71717a]">Extension</span>
-              <span className="text-[#52525b]">v4.0.0</span>
+            <div style={{ ...styles.row, marginBottom: 8 }}>
+              <span style={{ color: "#71717a" }}>Extension</span>
+              <span style={{ color: "#52525b" }}>v4.0.0</span>
             </div>
-            <button
-              onClick={loadStatus}
-              className="mt-2 w-full py-1.5 rounded-[6px] text-[11px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#71717a] hover:text-[#e4e4e7] transition-colors"
-            >
-              Refresh
-            </button>
+            <button onClick={loadStatus} style={{ ...styles.button(), marginTop: 8 }}>Refresh</button>
           </div>
         )}
 
         {tab === "settings" && (
-          <div className="space-y-3 text-[12px]">
-            <div>
-              <label className="block text-[11px] text-[#71717a] mb-1">API URL</label>
-              <input
-                type="text"
-                defaultValue="http://localhost:3001"
-                className="w-full px-2 py-1.5 rounded-[4px] text-[12px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7]"
-              />
+          <div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={styles.label}>API URL</label>
+              <input type="text" defaultValue="http://localhost:3001" style={styles.input} />
             </div>
-            <div>
-              <label className="block text-[11px] text-[#71717a] mb-1">HMAC Secret</label>
-              <input
-                type="password"
-                className="w-full px-2 py-1.5 rounded-[4px] text-[12px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7]"
-              />
+            <div style={{ marginBottom: 12 }}>
+              <label style={styles.label}>HMAC Secret</label>
+              <input type="password" style={styles.input} />
             </div>
           </div>
         )}

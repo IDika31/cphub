@@ -4,10 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CPHub Extension</title>
-    <link rel="stylesheet" href="./styles/popup.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        background: #0f0f10;
+        color: #e4e4e7;
+        width: 340px;
+        min-height: 400px;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        min-height: 400px;
+      }
+    </style>
   </head>
-  <body class="bg-[#0f0f10] text-[#e4e4e7] w-[340px] min-h-[400px]">
+  <body>
     <div id="root"></div>
-    <script type="module" src="./App.tsx"></script>
+    <script type="module" src="./main.tsx"></script>
   </body>
 </html>
