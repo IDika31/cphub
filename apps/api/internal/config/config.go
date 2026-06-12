@@ -3,8 +3,11 @@ package config
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
@@ -96,14 +99,23 @@ type LogConfig struct {
 }
 
 func Load() *Config {
-	// Look for .env in project root (two levels up from apps/api/)
-	viper.SetConfigFile(".env")
-	viper.AddConfigPath(".")
-	viper.AddConfigPath("..")
-	viper.AddConfigPath("../..") // repo root from apps/api/
-	viper.AutomaticEnv()
+	// Load .env from repo root using godotenv
+	envPaths := []string{".env", "../../.env", "../.env"}
+	loaded := false
+	for _, p := range envPaths {
+		if _, err := os.Stat(p); err == nil {
+			if err := godotenv.Load(p); err == nil {
+				log.Printf("[config] loaded .env from %s", filepath.Clean(p))
+				loaded = true
+				break
+			}
+		}
+	}
+	if !loaded {
+		log.Println("[config] WARNING: no .env file found")
+	}
 
-	_ = viper.ReadInConfig()
+	viper.AutomaticEnv()
 
 	cfg := &Config{
 		DB: DBConfig{
