@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/url"
 	"time"
 
 	"github.com/IDika31/cphub/api/internal/database"
@@ -59,9 +60,9 @@ func (h *AccountHandler) LinkCodeforces(c *fiber.Ctx) error {
 
 	redirectURL := "https://codeforces.com/oauth/authorize" +
 		"?response_type=code" +
-		"&client_id=" + h.cfClientID +
-		"&redirect_uri=" + h.cfRedirectURL +
-		"&state=" + state
+		"&client_id=" + url.QueryEscape(h.cfClientID) +
+		"&redirect_uri=" + url.QueryEscape(h.cfRedirectURL) +
+		"&state=" + url.QueryEscape(state)
 
 	return c.JSON(fiber.Map{
 		"message":     "Redirecting to Codeforces OAuth...",
