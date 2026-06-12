@@ -5,7 +5,9 @@ import Topbar from "@/components/shell/topbar";
 import Button from "@/components/ui/button";
 import Badge from "@/components/ui/badge";
 import Skeleton from "@/components/ui/skeleton";
+import Modal from "@/components/ui/modal";
 import { fetchConnections, unlinkAccount, type LinkedAccount } from "@/lib/api/connections";
+import { API_BASE_URL } from "@/lib/api/client";
 
 interface ProviderRow {
   name: string;
@@ -18,10 +20,25 @@ interface ProviderRow {
 export default function ConnectionsPage() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tlxModalOpen, setTlxModalOpen] = useState(false);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  function handleLink(provider: string) {
+    switch (provider) {
+      case "codeforces":
+        window.open(`${API_BASE_URL}/api/auth/codeforces`, "_blank");
+        break;
+      case "tlx":
+        setTlxModalOpen(true);
+        break;
+      case "google":
+        window.location.href = `${API_BASE_URL}/api/auth/google`;
+        break;
+    }
+  }
 
   async function loadData() {
     setLoading(true);
@@ -115,7 +132,7 @@ export default function ConnectionsPage() {
                     Unlink
                   </Button>
                 ) : (
-                  <Button variant="primary">
+                  <Button variant="primary" onClick={() => handleLink(p.provider)}>
                     Link
                   </Button>
                 )}
@@ -123,6 +140,24 @@ export default function ConnectionsPage() {
             ))}
           </div>
         )}
+
+        <Modal open={tlxModalOpen} onClose={() => setTlxModalOpen(false)} title="Hubungkan TLX TOKI">
+          <div className="text-[13px] text-[#71717a] space-y-3">
+            <p>
+              TLX TOKI tidak memiliki OAuth API publik. Hubungkan akun melalui browser extension:
+            </p>
+            <ol className="list-decimal pl-5 space-y-2">
+              <li>Install <strong className="text-[#e4e4e7]">CPHub Extension</strong> di Chrome</li>
+              <li>Buka halaman profil TLX di browser</li>
+              <li>Extension akan mendeteksi sesi aktifmu</li>
+              <li>Klik tombol Sync di popup extension</li>
+              <li>Akun TLX akan muncul sebagai Connected di sini</li>
+            </ol>
+            <p className="text-[12px] text-[#52525b]">
+              Buka halaman <a href="/extension" className="text-[#8b5cf6] hover:underline">Extension</a> untuk panduan instalasi.
+            </p>
+          </div>
+        </Modal>
       </div>
     </>
   );
