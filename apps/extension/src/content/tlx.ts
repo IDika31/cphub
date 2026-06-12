@@ -12,6 +12,7 @@ function scrapeProblem(): Record<string, unknown> | null {
     const problemId = urlParts[urlParts.length - 1] || urlParts[urlParts.length - 2] || "";
 
     return {
+      provider: "tlx",
       problemId,
       title,
       statement: document.querySelector(".problem-statement, .content, article")?.textContent?.trim() || "",

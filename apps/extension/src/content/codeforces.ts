@@ -100,6 +100,7 @@ function scrapeProblem(): Record<string, unknown> | null {
     }
 
     return {
+      provider: "codeforces",
       problemId,
       contestId,
       title,
