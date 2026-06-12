@@ -33,6 +33,7 @@ type SyncProblemPayload struct {
 	Tags        string `json:"tags"`
 	URL         string `json:"url"`
 		Note       string `json:"note"`
+ ProblemGroup string `json:"problemGroup"`
 	TestCases   []SyncTestCase `json:"testCases"`
 }
 
@@ -79,6 +80,7 @@ func (h *SyncHandler) SyncProblem(c *fiber.Ctx) error {
 		URL:         payload.URL,
 		Status:      "synced",
 			Note:       payload.Note,
+			ProblemGroup: payload.ProblemGroup,
 	}
 
 	// Set ID for new problems

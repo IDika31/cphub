@@ -88,21 +88,25 @@ function scrapeProblem(): Record<string, unknown> | null {
     const urlPath = window.location.pathname;
     let problemId = "";
     let contestId = "";
+    let problemGroup = "";
 
     const contestMatch = urlPath.match(/\/contest\/(\d+)\/problem\/(\w+)/);
     const problemsetMatch = urlPath.match(/\/problemset\/problem\/(\d+)\/(\w+)/);
     if (contestMatch) {
       contestId = contestMatch[1];
       problemId = `${contestId}${contestMatch[2]}`;
+      problemGroup = document.querySelector(".caption.titled a, .rtable th a")?.textContent?.trim() || "";
     } else if (problemsetMatch) {
       contestId = problemsetMatch[1];
       problemId = `${contestId}${problemsetMatch[2]}`;
+      problemGroup = document.querySelector(".caption.titled a, .rtable th a")?.textContent?.trim() || "";
     }
 
     return {
       provider: "codeforces",
       problemId,
       contestId,
+      problemGroup,
       title,
       statement: statementHTML,
       inputSpec: inputSpecHTML,

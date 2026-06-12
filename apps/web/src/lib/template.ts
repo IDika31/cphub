@@ -5,6 +5,7 @@ export const TEMPLATES: Record<string, string> = {
 // platform: {provider}
 // problemid: {problemId}
 // problemname: {title}
+// problemgroup: {problemGroup}
 
 #include <bits/stdc++.h>
 #ifdef LOCAL
