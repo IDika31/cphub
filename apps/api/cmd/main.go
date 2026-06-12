@@ -65,7 +65,7 @@ func main() {
 	problemHandler := handler.NewProblemHandler(problemRepo)
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
 	dashboardHandler := handler.NewDashboardHandler()
-	accountHandler := handler.NewAccountHandler(db)
+	accountHandler := handler.NewAccountHandler(db, cfg.CF.ClientID, cfg.CF.ClientSecret, cfg.CF.RedirectURL)
 	settingsHandler := handler.NewSettingsHandler(db)
 	snippetHandler := handler.NewSnippetHandler(db)
 
@@ -119,14 +119,6 @@ func registerRoutes(
 		return c.Redirect(redirectURL, 302)
 	})
 	auth.Get("/google/callback", authHandler.GoogleCallback)
-	auth.Get("/codeforces", func(c *fiber.Ctx) error {
-		redirectURL := "https://codeforces.com/oauth/authorize" +
-			"?response_type=code" +
-			"&client_id=" + cfg.CF.ClientID +
-			"&redirect_uri=" + cfg.CF.RedirectURL +
-			"&scope=read"
-		return c.Redirect(redirectURL, 302)
-	})
 	auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	auth.Post("/logout", middleware.AuthRequired(cfg.JWT), authHandler.Logout)
 
@@ -158,6 +150,13 @@ func registerRoutes(
 	accounts.Delete("/:id", accountHandler.Unlink)
 	accounts.Post("/codeforces", accountHandler.LinkCodeforces)
 	accounts.Post("/tlx", accountHandler.LinkTLX)
+
+	// Codeforces OAuth (JWT required to link, callback is public)
+	auth.Get("/codeforces/callback", handler.HandleCodeforcesCallback(database.DB, handler.CFConfig{
+		ClientID:     cfg.CF.ClientID,
+		ClientSecret: cfg.CF.ClientSecret,
+		RedirectURL:  cfg.CF.RedirectURL,
+	}))
 
 	// Dashboard
 	dashboard := app.Group("/api/dashboard", middleware.AuthRequired(cfg.JWT))

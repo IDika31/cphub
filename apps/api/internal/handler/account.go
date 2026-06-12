@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"time"
+
+	"github.com/IDika31/cphub/api/internal/database"
 	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/google/uuid"
 	"github.com/gofiber/fiber/v2"
@@ -8,11 +11,19 @@ import (
 )
 
 type AccountHandler struct {
-	db *gorm.DB
+	db             *gorm.DB
+	cfClientID     string
+	cfClientSecret string
+	cfRedirectURL  string
 }
 
-func NewAccountHandler(db *gorm.DB) *AccountHandler {
-	return &AccountHandler{db: db}
+func NewAccountHandler(db *gorm.DB, cfClientID, cfClientSecret, cfRedirectURL string) *AccountHandler {
+	return &AccountHandler{
+		db:             db,
+		cfClientID:     cfClientID,
+		cfClientSecret: cfClientSecret,
+		cfRedirectURL:  cfRedirectURL,
+	}
 }
 
 func (h *AccountHandler) List(c *fiber.Ctx) error {
@@ -40,14 +51,26 @@ func (h *AccountHandler) Unlink(c *fiber.Ctx) error {
 }
 
 func (h *AccountHandler) LinkCodeforces(c *fiber.Ctx) error {
-	// Initiate Codeforces OIDC flow
-	// In production, redirect to CF OAuth
-	return c.JSON(fiber.Map{"message": "Redirecting to Codeforces OAuth...", "redirectUrl": "/api/auth/codeforces"})
+	userID := c.Locals("userId").(string)
+
+	state := uuid.New().String()
+	redisCtx := c.Context()
+	_ = database.Cache.Set(redisCtx, "cf_oauth:"+state, userID, 10*time.Minute).Err()
+
+	redirectURL := "https://codeforces.com/oauth/authorize" +
+		"?response_type=code" +
+		"&client_id=" + h.cfClientID +
+		"&redirect_uri=" + h.cfRedirectURL +
+		"&scope=read" +
+		"&state=" + state
+
+	return c.JSON(fiber.Map{
+		"message":     "Redirecting to Codeforces OAuth...",
+		"redirectUrl": redirectURL,
+	})
 }
 
 func (h *AccountHandler) LinkTLX(c *fiber.Ctx) error {
-	// TLX verification requires extension
-	// Return HMAC token for extension to use
 	return c.JSON(fiber.Map{
 		"message": "Open TLX profile page and use the browser extension to verify",
 	})
