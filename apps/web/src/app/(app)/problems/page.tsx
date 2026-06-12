@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Files } from "lucide-react";
 import Link from "next/link";
 import Topbar from "@/components/shell/topbar";
@@ -11,14 +12,25 @@ import { TableSkeleton } from "@/components/ui/skeleton";
 import { fetchProblems } from "@/lib/api/problems";
 import type { Problem } from "@/lib/api/types";
 
-const PROVIDERS = ["", "codeforces", "tlx"];
+const PROVIDERS: Array<{ value: string; label: string }> = [
+  { value: "", label: "All" },
+  { value: "codeforces", label: "Codeforces" },
+  { value: "tlx", label: "TLX" },
+];
 
-export default function ProblemsetPage() {
-  const [provider, setProvider] = useState("");
+function ProblemsetContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialProvider = searchParams.get("provider") || "";
+  const [provider, setProvider] = useState(initialProvider);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setProvider(searchParams.get("provider") || "");
+  }, [searchParams]);
 
   useEffect(() => {
     setLoading(true);
@@ -48,13 +60,13 @@ export default function ProblemsetPage() {
         <div className="flex gap-2 mb-3">
           {PROVIDERS.map((p) => (
             <button
-              key={p}
-              onClick={() => setProvider(p)}
+              key={p.value}
+              onClick={() => { setProvider(p.value); router.push(`/problems${p.value ? `?provider=${p.value}` : ""}`); }}
               className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors ${
-                provider === p ? "bg-[#8b5cf6] text-white" : "bg-[#1f1f23] text-[#71717a] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
+                provider === p.value ? "bg-[#8b5cf6] text-white" : "bg-[#1f1f23] text-[#71717a] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
               }`}
             >
-              {p === "" ? "All" : p === "codeforces" ? "Codeforces" : "TLX"}
+              {p.label}
             </button>
           ))}
         </div>
@@ -116,5 +128,13 @@ export default function ProblemsetPage() {
         )}
       </div>
     </>
+  );
+}
+
+export default function ProblemsetPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[14px] text-[#52525b] animate-pulse">Loading...</div>}>
+      <ProblemsetContent />
+    </Suspense>
   );
 }
