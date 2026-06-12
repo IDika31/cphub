@@ -7,8 +7,7 @@ using namespace std;
 int main() {
   ios::sync_with_stdio(false);
   cin.tie(nullptr);
-  {cursor}
-  return 0;
+    return 0;
 }`,
   cpp20: `#include <bits/stdc++.h>
 using namespace std;
@@ -16,14 +15,12 @@ using namespace std;
 int main() {
   ios::sync_with_stdio(false);
   cin.tie(nullptr);
-  {cursor}
-  return 0;
+    return 0;
 }`,
   python3: `import sys
 
 def solve():
-    {cursor}
-
+    
 if __name__ == "__main__":
     solve()`,
   java21: `import java.util.*;
@@ -31,14 +28,12 @@ if __name__ == "__main__":
 public class Solution {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
-        {cursor}
-    }
+            }
 }`,
   nodejs: `"use strict";
 
 function solve() {
-  {cursor}
-}
+  }
 
 solve();`,
 };
