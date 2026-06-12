@@ -35,11 +35,7 @@ export default function ProblemDetailPage() {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
   const [language, setLanguage] = useState("cpp20");
-  const [code, setCode] = useState(() => {
-    // Load saved code or default template immediately
-    const saved = typeof window !== "undefined" && id ? loadFromLocalStorage(id, "cpp20") : null;
-    return saved || getDefaultTemplate("cpp20");
-  });
+  const [code, setCode] = useState("");
   const [result, setResult] = useState<GraderResult | null>(null);
   const [running, setRunning] = useState(false);
   const [tab, setTab] = useState<"grader" | "testcases">("grader");
@@ -57,8 +53,9 @@ export default function ProblemDetailPage() {
       .then((p) => {
         setProblem(p);
         const saved = loadFromLocalStorage(id, language);
-        if (!saved) {
-          // Apply template with real metadata from sync
+        if (saved) {
+          setCode(saved);
+        } else {
           const tpl = getDefaultTemplate(language);
           const vars: Record<string, string> = {
             provider: p.provider || "cf",
@@ -67,11 +64,12 @@ export default function ProblemDetailPage() {
             problemGroup: (p as Record<string,string>).problemGroup || "",
           };
           setCode(applyTemplate(tpl, vars));
-        } else {
-          setCode(saved);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        // On error, at least load the template
+        setCode(getDefaultTemplate(language));
+      })
       .finally(() => setLoading(false));
   }, [id]);
 
