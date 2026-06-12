@@ -66,6 +66,8 @@ func main() {
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
 	dashboardHandler := handler.NewDashboardHandler()
 	accountHandler := handler.NewAccountHandler(db)
+	settingsHandler := handler.NewSettingsHandler(db)
+	snippetHandler := handler.NewSnippetHandler(db)
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
@@ -78,7 +80,7 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, cfg)
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -97,6 +99,8 @@ func registerRoutes(
 	submissionHandler *handler.SubmissionHandler,
 	dashboardHandler *handler.DashboardHandler,
 	accountHandler *handler.AccountHandler,
+	settingsHandler *handler.SettingsHandler,
+	snippetHandler *handler.SnippetHandler,
 	cfg *config.Config,
 ) {
 	// Health
@@ -154,4 +158,16 @@ func registerRoutes(
 	dashboard.Get("/rating", dashboardHandler.RatingHistory)
 	dashboard.Get("/heatmap", dashboardHandler.Heatmap)
 	dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
+
+	// Settings
+	settingsGroup := app.Group("/api/settings", middleware.AuthRequired(cfg.JWT))
+	settingsGroup.Get("/", settingsHandler.Get)
+	settingsGroup.Put("/", settingsHandler.Update)
+
+	// Snippets
+	snippets := app.Group("/api/snippets", middleware.AuthRequired(cfg.JWT))
+	snippets.Get("/", snippetHandler.List)
+	snippets.Post("/", snippetHandler.Create)
+	snippets.Delete("/:id", snippetHandler.Delete)
+	snippets.Get("/search", snippetHandler.Search)
 }
