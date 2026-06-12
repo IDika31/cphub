@@ -5,7 +5,13 @@ import (
 
 	"github.com/IDika31/cphub/api/internal/config"
 	"github.com/IDika31/cphub/api/internal/database"
+	"github.com/IDika31/cphub/api/internal/grader"
+	"github.com/IDika31/cphub/api/internal/handler"
+	"github.com/IDika31/cphub/api/internal/middleware"
+	"github.com/IDika31/cphub/api/internal/repository"
 	"github.com/IDika31/cphub/api/internal/server"
+	"github.com/IDika31/cphub/api/internal/service"
+	"github.com/gofiber/fiber/v2"
 )
 
 func main() {
@@ -29,7 +35,6 @@ func main() {
 	}
 	log.Printf("[cphub] Redis connected: %s:%d", cfg.Redis.Host, cfg.Redis.Port)
 
-	// Close connections on exit
 	defer func() {
 		if err := database.Close(); err != nil {
 			log.Printf("[cphub] error closing database: %v", err)
@@ -39,9 +44,24 @@ func main() {
 		}
 	}()
 
-	// Keep db and rdb references
-	_ = db
-	_ = rdb
+	// Initialize grader queue
+	grader.InitQueue(cfg.Grader.MaxConcurrent)
+
+	// Repositories
+	userRepo := repository.NewUserRepository(db)
+	problemRepo := repository.NewProblemRepository(db)
+	submissionRepo := repository.NewSubmissionRepository(db)
+
+	// Services
+	authSvc := service.NewAuthService(db, cfg.JWT)
+
+	// Handlers
+	authHandler := handler.NewAuthHandler(authSvc)
+	graderHandler := handler.NewGraderHandler(cfg.Grader, grader.GetQueue())
+	syncHandler := handler.NewSyncHandler(problemRepo, submissionRepo)
+	problemHandler := handler.NewProblemHandler(problemRepo)
+	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
+	dashboardHandler := handler.NewDashboardHandler()
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
@@ -49,8 +69,12 @@ func main() {
 		Port: cfg.Server.Port,
 	})
 
+	_ = rdb
+
+	app := srv.App()
+
 	// Register routes
-	registerRoutes(srv.App())
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -60,12 +84,54 @@ func main() {
 	log.Println("[cphub] shutdown complete")
 }
 
-func registerRoutes(app *fiber.App) {
-	app.Get("/api/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"status": "ok",
-			"service": "cphub-api",
-			"version": "4.0.0",
-		})
-	})
+func registerRoutes(
+	app *fiber.App,
+	authHandler *handler.AuthHandler,
+	graderHandler *handler.GraderHandler,
+	syncHandler *handler.SyncHandler,
+	problemHandler *handler.ProblemHandler,
+	submissionHandler *handler.SubmissionHandler,
+	dashboardHandler *handler.DashboardHandler,
+	cfg *config.Config,
+) {
+	// Health
+	app.Get("/api/health", dashboardHandler.Health)
+
+	// Auth
+	auth := app.Group("/api/auth")
+	auth.Post("/register", authHandler.Register)
+	auth.Post("/login", authHandler.Login)
+	auth.Get("/google", authHandler.GoogleLogin)
+	auth.Get("/google/callback", authHandler.GoogleCallback)
+	auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
+	auth.Post("/logout", middleware.AuthRequired(cfg.JWT), authHandler.Logout)
+
+	// Sync (HMAC protected)
+	sync := app.Group("/api/sync")
+	sync.Use(middleware.HMACVerify(cfg.Extension))
+	sync.Post("/problem", syncHandler.SyncProblem)
+	sync.Post("/submission", syncHandler.SyncSubmission)
+
+	// Problems (public read, optional auth)
+	problems := app.Group("/api/problems", middleware.OptionalAuth(cfg.JWT))
+	problems.Get("/", problemHandler.List)
+	problems.Get("/search", problemHandler.Search)
+	problems.Get("/:id", problemHandler.GetByID)
+
+	// Grader
+	graderGroup := app.Group("/api/grader", middleware.AuthRequired(cfg.JWT))
+	graderGroup.Post("/run", graderHandler.Run)
+	graderGroup.Get("/status", graderHandler.Status)
+
+	// Submissions
+	submissions := app.Group("/api/submissions", middleware.AuthRequired(cfg.JWT))
+	submissions.Get("/local", submissionHandler.ListLocal)
+	submissions.Get("/external", submissionHandler.ListExternal)
+
+	// Dashboard
+	dashboard := app.Group("/api/dashboard", middleware.AuthRequired(cfg.JWT))
+	dashboard.Get("/overview", dashboardHandler.Overview)
+	dashboard.Get("/rating", dashboardHandler.RatingHistory)
+	dashboard.Get("/heatmap", dashboardHandler.Heatmap)
+	dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
 }
