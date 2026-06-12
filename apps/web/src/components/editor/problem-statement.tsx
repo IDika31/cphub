@@ -66,7 +66,7 @@ export default function ProblemStatement({ html, title }: ProblemStatementProps)
   }, [html]);
 
   return (
-    <div className="problem-statement-content text-[13px] leading-relaxed text-[#e4e4e7]">
+    <div className="problem-statement-content text-[15px] leading-relaxed text-[#e4e4e7]">
       {title && <h2 className="text-[16px] font-semibold mb-3">{title}</h2>}
       <div
         ref={containerRef}
