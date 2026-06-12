@@ -7,6 +7,7 @@ interface MonacoEditorProps {
   value: string;
   language: string;
   onChange?: (value: string) => void;
+  onRun?: () => void;
   onMount?: (editor: editor.IStandaloneCodeEditor) => void;
 }
 
@@ -46,6 +47,16 @@ export default function MonacoEditor({
 
       ed.onDidChangeModelContent(() => {
         onChange?.(ed.getValue());
+      });
+
+      // Ctrl+Enter shortcut
+      ed.addAction({
+        id: "run-code",
+        label: "Run Code",
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+        run: () => {
+          onRun?.();
+        },
       });
 
       onMount?.(ed);
