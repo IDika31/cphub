@@ -47,20 +47,22 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
   if (command === "open-editor") {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (!tab?.url) return;
+      if (!tab?.url || !tab?.id) return;
       const url = tab.url;
-      let editorUrl = "http://localhost:3000/problems";
-      // Extract CF problem: /contest/123/problem/A or /problemset/problem/123/A
-      const cfMatch = url.match(/codeforces\.com\/(?:contest|problemset)\/(?:problem\/)?(\d+)\/(\w+)/);
-      if (cfMatch) {
-        editorUrl = `http://localhost:3000/problems?cf=${cfMatch[1]}${cfMatch[2]}`;
+      const isCF = url.includes("codeforces.com");
+      const isTLX = url.includes("tlx.toki.id");
+
+      if (isCF || isTLX) {
+        // Trigger sync in content script, then open CPHub
+        chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
+        // Wait briefly for sync to complete, then open problems page
+        setTimeout(() => {
+          chrome.tabs.create({ url: "http://localhost:3000/problems" });
+        }, 1500);
+      } else {
+        // Not on a problem page — just open dashboard
+        chrome.tabs.create({ url: "http://localhost:3000/dashboard" });
       }
-      // Extract TLX problem: /problems/xxx
-      const tlxMatch = url.match(/tlx\.toki\.id\/problems\/([^/?]+)/);
-      if (tlxMatch) {
-        editorUrl = `http://localhost:3000/problems?tlx=${tlxMatch[1]}`;
-      }
-      chrome.tabs.create({ url: editorUrl });
     });
   }
 });
