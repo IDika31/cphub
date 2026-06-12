@@ -190,8 +190,34 @@ export default function ProblemDetailPage() {
           )}
         </div>
 
-        {/* Resize Handle */}
-        <div className="w-[5px] flex-shrink-0 cursor-col-resize bg-[rgba(255,255,255,0.08)] hover:bg-[#8b5cf6] transition-colors" />
+        {/* Resize Handle — horizontal */}
+        <div
+          className="w-[5px] flex-shrink-0 cursor-col-resize bg-[rgba(255,255,255,0.08)] hover:bg-[#8b5cf6] transition-colors"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const leftPane = e.currentTarget.previousElementSibling as HTMLElement;
+            const rightPane = e.currentTarget.nextElementSibling as HTMLElement;
+            const startX = e.clientX;
+            const startLeftWidth = leftPane.offsetWidth;
+            const startRightWidth = rightPane ? rightPane.offsetWidth : 0;
+            const totalWidth = startLeftWidth + startRightWidth + 5;
+            function onMove(ev: MouseEvent) {
+              const dx = ev.clientX - startX;
+              const newLeft = Math.max(200, Math.min(totalWidth - 300, startLeftWidth + dx));
+              leftPane.style.width = newLeft + "px";
+              leftPane.style.flex = "none";
+              if (rightPane) {
+                rightPane.style.flex = "1 1 0%";
+              }
+            }
+            function onUp() {
+              document.removeEventListener("mousemove", onMove);
+              document.removeEventListener("mouseup", onUp);
+            }
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+          }}
+        />
 
         {/* Right: Editor + Grader */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -206,7 +232,34 @@ export default function ProblemDetailPage() {
           </div>
 
           {/* Row Resize */}
-          <div className="h-[5px] flex-shrink-0 cursor-row-resize bg-[rgba(255,255,255,0.08)] hover:bg-[#8b5cf6] transition-colors" />
+          <div
+            className="h-[5px] flex-shrink-0 cursor-row-resize bg-[rgba(255,255,255,0.08)] hover:bg-[#8b5cf6] transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const parent = e.currentTarget.parentElement as HTMLElement;
+              const topPane = e.currentTarget.previousElementSibling as HTMLElement;
+              const bottomPane = e.currentTarget.nextElementSibling as HTMLElement;
+              const startY = e.clientY;
+              const startTopHeight = topPane.offsetHeight;
+              const startBottomHeight = bottomPane ? bottomPane.offsetHeight : 0;
+              const totalHeight = startTopHeight + startBottomHeight + 5;
+              function onMove(ev: MouseEvent) {
+                const dy = ev.clientY - startY;
+                const newTop = Math.max(100, Math.min(totalHeight - 100, startTopHeight + dy));
+                topPane.style.height = newTop + "px";
+                topPane.style.flex = "none";
+                if (bottomPane) {
+                  bottomPane.style.flex = "1 1 0%";
+                }
+              }
+              function onUp() {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+              }
+              document.addEventListener("mousemove", onMove);
+              document.addEventListener("mouseup", onUp);
+            }}
+          />
 
           {/* Grader Panel */}
           <div className="flex-[2] min-h-0 bg-[#18181b] flex flex-col">
