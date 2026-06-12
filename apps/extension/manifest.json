@@ -1,0 +1,77 @@
+{
+  "manifest_version": 3,
+  "name": "CPHub — Competitive Programming Hub",
+  "version": "4.0.0",
+  "description": "Sync Codeforces & TLX TOKI problems to CPHub local dashboard",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "public/icons/icon-16.png",
+    "48": "public/icons/icon-48.png",
+    "128": "public/icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "CPHub",
+    "default_icon": {
+      "16": "public/icons/icon-16.png",
+      "48": "public/icons/icon-48.png"
+    }
+  },
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://codeforces.com/problemset/problem/*",
+        "https://codeforces.com/contest/*/problem/*",
+        "https://codeforces.com/problemset/status/*",
+        "https://codeforces.com/contest/*/status/*",
+        "https://codeforces.com/profile/*"
+      ],
+      "js": ["src/content/codeforces.ts"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://tlx.toki.id/problems/*",
+        "https://tlx.toki.id/submissions/*",
+        "https://tlx.toki.id/profiles/*"
+      ],
+      "js": ["src/content/tlx.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "https://codeforces.com/*",
+    "https://tlx.toki.id/*",
+    "http://localhost:3001/*"
+  ],
+  "commands": {
+    "sync-current-problem": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Sync current problem to CPHub"
+    },
+    "open-dashboard": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+O",
+        "mac": "Command+Shift+O"
+      },
+      "description": "Open CPHub dashboard"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
