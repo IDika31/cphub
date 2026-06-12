@@ -98,7 +98,7 @@ function ProblemsetContent() {
                   return (
                     <tr key={p.id} className="border-b border-[rgba(255,255,255,0.04)] hover:bg-[#1f1f23] transition-colors cursor-pointer">
                       <td className="py-[10px] px-[14px]">
-                        <Link href={`/problems/${p.id}`} className="text-[#e4e4e7] hover:text-[#8b5cf6] transition-colors">
+                        <Link href={`/problems/${p.problemId}`} className="text-[#e4e4e7] hover:text-[#8b5cf6] transition-colors">
                           {p.title}
                         </Link>
                       </td>

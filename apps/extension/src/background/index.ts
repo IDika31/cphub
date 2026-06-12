@@ -60,8 +60,9 @@ chrome.commands.onCommand.addListener(async (command) => {
         const cfId = cfMatch ? `${cfMatch[1]}${cfMatch[2]}` : "";
         // Open CPHub — use provider filter so problem appears at top
         const provider = isCF ? "codeforces" : "tlx";
+        // Open editor directly with natural problem ID (e.g., "2234G")
         const editorUrl = cfId
-          ? `http://localhost:3000/problems?provider=${provider}&q=${cfId}`
+          ? `http://localhost:3000/problems/${cfId}`
           : `http://localhost:3000/problems?provider=${provider}`;
         setTimeout(() => {
           chrome.tabs.create({ url: editorUrl });

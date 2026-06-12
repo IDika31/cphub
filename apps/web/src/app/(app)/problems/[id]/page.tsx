@@ -43,11 +43,15 @@ export default function ProblemDetailPage() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    fetchProblem(id)
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(id);
+    const promise = isUuid
+      ? fetchProblem(id)
+      : fetch('http://localhost:3001/api/problems/by-provider/codeforces/' + id).then(r => r.json());
+    promise
       .then((p) => {
         setProblem(p);
-        // Load saved code or use template
-        const saved = loadFromLocalStorage(id, language);
+        const pid = p.id || id;
+        const saved = loadFromLocalStorage(pid, language);
         setCode(saved || getDefaultTemplate(language));
       })
       .catch(() => {})
