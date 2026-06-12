@@ -56,12 +56,18 @@ export default function ProblemDetailPage() {
     promise
       .then((p) => {
         setProblem(p);
-        // Use URL id as key — consistent between save and load
         const saved = loadFromLocalStorage(id, language);
         if (!saved) {
           const tpl = getDefaultTemplate(language);
-          const vars = { provider: p.provider || "cf", problemId: p.problemId || id, title: p.title || "" };
-          setCode(applyTemplate(tpl, vars));
+          const vars = {
+            provider: p.provider || "cf",
+            problemId: p.problemId || id,
+            title: p.title || "",
+            problemGroup: (p as Record<string,string>).problemGroup || "",
+          };
+          const final = applyTemplate(tpl, vars);
+          setCode(final);
+          if (id) saveToLocalStorage(id, language, final);
         } else {
           setCode(saved);
         }
@@ -116,7 +122,12 @@ export default function ProblemDetailPage() {
 
   function handleTemplate() {
     const tpl = getDefaultTemplate(language);
-    const vars = { provider: problem?.provider || "cf", problemId: problem?.problemId || id, title: problem?.title || "" };
+    const vars = {
+      provider: problem?.provider || "cf",
+      problemId: problem?.problemId || id,
+      title: problem?.title || "",
+      problemGroup: (problem as Record<string,string>|null)?.problemGroup || "",
+    };
     const newCode = applyTemplate(tpl, vars);
     setCode(newCode);
     if (id) saveToLocalStorage(id, language, newCode);
@@ -281,108 +292,115 @@ export default function ProblemDetailPage() {
             }}
           />
 
-          {/* Grader Panel */}
-          <div className="flex-[2] min-h-0 bg-[#18181b] flex flex-col">
-            <div className="flex border-b border-[rgba(255,255,255,0.08)]">
-              <button
-                onClick={() => setTab("grader")}
-                className={`px-[14px] text-[12px] font-medium flex items-center gap-[5px] h-[34px] transition-colors ${
-                  tab === "grader" ? "text-[#8b5cf6] border-b-2 border-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7] border-b-2 border-transparent"
-                }`}
-              >
-                Grader
-              </button>
-              <button
-                onClick={() => setTab("testcases")}
-                className={`px-[14px] text-[12px] font-medium flex items-center gap-[5px] h-[34px] transition-colors ${
-                  tab === "testcases" ? "text-[#8b5cf6] border-b-2 border-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7] border-b-2 border-transparent"
-                }`}
-              >
-                Test Cases
-                <span className="min-w-[16px] h-4 px-1 rounded-full text-[10px] font-semibold bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] inline-flex items-center justify-center">
-                  {problem?.testCases?.length || 0}
+          {/* Bottom Panel */}
+          <div className="flex-[2] min-h-0 bg-[#18181b] flex flex-col border-t border-[rgba(255,255,255,0.08)]">
+            {/* Tab bar */}
+            <div className="flex items-center border-b border-[rgba(255,255,255,0.08)]">
+              {(["grader", "testcases"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-[16px] text-[12px] font-medium flex items-center gap-[6px] h-[32px] transition-colors ${
+                    tab === t
+                      ? "text-[#8b5cf6] border-b-2 border-[#8b5cf6]"
+                      : "text-[#71717a] hover:text-[#e4e4e7] border-b-2 border-transparent"
+                  }`}
+                >
+                  {t === "grader" ? "Grader" : "Test Cases"}
+                  {t === "testcases" && (
+                    <span className="min-w-[18px] h-[18px] px-[5px] rounded-full text-[10px] font-semibold bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] inline-flex items-center justify-center">
+                      {problem?.testCases?.length || 0}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {running && (
+                <span className="ml-auto mr-[14px] text-[11px] text-[#71717a] animate-pulse">
+                  Running...
                 </span>
-              </button>
+              )}
+              {result && !running && (
+                <div className="ml-auto mr-[14px] flex items-center gap-2">
+                  <VerdictBadge verdict={result.verdict} />
+                  <span className="text-[11px] text-[#52525b]">
+                    {result.passedTests}/{result.totalTests} · {result.maxRuntime}ms
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-[14px]">
+            {/* Panel content */}
+            <div className="flex-1 overflow-y-auto p-[12px]">
               {tab === "grader" && (
-                <div className="space-y-3 text-[12px]">
-                  {running && (
-                    <div className="text-subtle animate-pulse">Compiling & running tests...</div>
-                  )}
-
-                  {result && !running && (
-                    <>
-                      <div className="flex items-center gap-2 p-[10px] rounded-[6px] bg-[#1f1f23]">
-                        <span className="text-subtle">Verdict:</span>
-                        <VerdictBadge verdict={result.verdict} />
-                        <span className="text-muted ml-auto">
-                          {result.passedTests}/{result.totalTests} passed · {result.maxRuntime}ms
-                        </span>
-                      </div>
-
-                      {result.compileError && (
-                        <div className="p-[10px] rounded-[6px] bg-[rgba(239,68,68,0.08)] text-red-500 text-[11px] font-mono whitespace-pre-wrap max-h-[200px] overflow-y-auto">
-                          {result.compileError}
-                        </div>
-                      )}
-
-                      {result.results.map((r, i) => (
-                        <div key={i} className="p-[10px] rounded-[6px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)]">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[11px] text-muted">Test #{i + 1}</span>
-                            <VerdictBadge verdict={r.verdict} />
-                            <span className="text-[11px] text-muted ml-auto">{r.runtime}ms</span>
-                          </div>
-                          {r.verdict === "WA" && (
-                            <div className="grid grid-cols-2 gap-2 mt-2 text-[11px]">
-                              <div>
-                                <div className="text-red-500 mb-0.5 text-[10px] uppercase">Expected</div>
-                                <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[6px] rounded-[4px] font-mono max-h-[80px] overflow-y-auto">{r.expected}</pre>
-                              </div>
-                              <div>
-                                <div className="text-green-500 mb-0.5 text-[10px] uppercase">Got</div>
-                                <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[6px] rounded-[4px] font-mono max-h-[80px] overflow-y-auto">{r.output}</pre>
-                              </div>
-                            </div>
-                          )}
-                          {r.error && (
-                            <div className="mt-1 text-[11px] text-red-500 font-mono whitespace-pre-wrap">{r.error}</div>
-                          )}
-                        </div>
-                      ))}
-                    </>
-                  )}
-
+                <>
                   {!result && !running && (
-                    <div className="text-muted text-center py-8">
-                      <Play className="w-5 h-5 mx-auto mb-2 opacity-30" />
-                      Click <span className="text-white font-medium">Run</span> or press{" "}
-                      <kbd className="px-[4px] py-[1px] text-[10px] bg-[#1f1f23] border border-white/10 rounded-[3px]">Ctrl+Enter</kbd>
+                    <div className="flex flex-col items-center justify-center h-full gap-2">
+                      <div className="w-10 h-10 rounded-full bg-[#1f1f23] flex items-center justify-center">
+                        <Play className="w-4 h-4 text-[#52525b]" />
+                      </div>
+                      <p className="text-[12px] text-[#52525b]">
+                        Click <span className="text-[#e4e4e7] font-medium">Run</span> or press{" "}
+                        <kbd className="px-[4px] py-[1px] text-[10px] bg-[#1f1f23] border border-white/10 rounded-[3px]">Ctrl+Enter</kbd>
+                      </p>
                     </div>
                   )}
-                </div>
+
+                  {result?.compileError && (
+                    <div className="p-[10px] rounded-[6px] bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.15)] text-[#ef4444] text-[11px] font-mono whitespace-pre-wrap max-h-[200px] overflow-y-auto mb-2">
+                      {result.compileError}
+                    </div>
+                  )}
+
+                  {result?.results.map((r, i) => (
+                    <div key={i} className={`mb-2 p-[10px] rounded-[6px] ${
+                      r.verdict === "AC" ? "bg-[rgba(16,185,129,0.06)] border border-[rgba(16,185,129,0.15)]" :
+                      r.verdict === "WA" ? "bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)]" :
+                      "bg-[#1f1f23] border border-[rgba(255,255,255,0.08)]"
+                    }`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[11px] text-[#52525b] font-medium">Test #{i + 1}</span>
+                        <VerdictBadge verdict={r.verdict} />
+                        <span className="ml-auto text-[11px] text-[#52525b]">{r.runtime}ms</span>
+                      </div>
+                      {r.verdict !== "AC" && (
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <div className="text-[#ef4444] mb-1 text-[10px] uppercase tracking-wide font-medium">Expected</div>
+                            <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[8px] rounded-[4px] font-mono max-h-[120px] overflow-y-auto">{r.expected}</pre>
+                          </div>
+                          <div>
+                            <div className="text-[#10b981] mb-1 text-[10px] uppercase tracking-wide font-medium">Got</div>
+                            <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[8px] rounded-[4px] font-mono max-h-[120px] overflow-y-auto">{r.output}</pre>
+                          </div>
+                        </div>
+                      )}
+                      {r.error && <div className="mt-1 text-[11px] text-[#ef4444] font-mono whitespace-pre-wrap">{r.error}</div>}
+                    </div>
+                  ))}
+                </>
               )}
 
               {tab === "testcases" && (
-                <div className="space-y-2">
-                  {problem?.testCases?.length === 0 ? (
-                    <div className="text-muted text-center py-8">No test cases available for this problem</div>
+                <div className="space-y-1">
+                  {!problem?.testCases?.length ? (
+                    <div className="flex flex-col items-center justify-center h-full gap-2">
+                      <p className="text-[12px] text-[#52525b]">No test cases synced yet</p>
+                      <p className="text-[11px] text-[#52525b]">Visit the problem on Codeforces to auto-sync</p>
+                    </div>
                   ) : (
-                    problem?.testCases?.map((tc, i) => (
+                    problem.testCases.map((tc, i) => (
                       <details key={tc.id || i} className="group">
-                        <summary className="text-[12px] text-subtle cursor-pointer hover:text-white transition-colors py-1 select-none">
-                          Test #{i + 1} {tc.isSample && <span className="text-[10px] text-accent ml-1">(sample)</span>}
+                        <summary className="text-[12px] text-[#71717a] cursor-pointer hover:text-[#e4e4e7] py-[6px] px-[6px] rounded-[4px] hover:bg-[#1f1f23] transition-colors select-none">
+                          Test #{i + 1} {tc.isSample && <span className="text-[10px] text-[#8b5cf6] ml-1">(sample)</span>}
                         </summary>
-                        <div className="grid grid-cols-2 gap-2 mt-1 mb-2">
+                        <div className="grid grid-cols-2 gap-2 mt-1 mb-2 px-[6px]">
                           <div>
-                            <div className="text-[10px] text-muted mb-0.5 uppercase">Input</div>
-                            <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[100px] overflow-y-auto">{tc.input}</pre>
+                            <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Input</div>
+                            <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[150px] overflow-y-auto">{tc.input}</pre>
                           </div>
                           <div>
-                            <div className="text-[10px] text-muted mb-0.5 uppercase">Expected Output</div>
-                            <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[100px] overflow-y-auto">{tc.output}</pre>
+                            <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Expected</div>
+                            <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[150px] overflow-y-auto">{tc.output}</pre>
                           </div>
                         </div>
                       </details>
