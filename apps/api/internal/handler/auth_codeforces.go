@@ -147,20 +147,39 @@ func exchangeCFToken(code string, cfg CFConfig) (accessToken string, idToken str
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("[cf_oauth] token response: %s", string(body))
+	log.Printf("[cf_oauth] token HTTP %d: %s", resp.StatusCode, string(body))
 
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Try JSON response first (OIDC standard)
+	var jsonResp struct {
+		AccessToken string `json:"access_token"`
+		IDToken     string `json:"id_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int    `json:"expires_in"`
+		Error       string `json:"error"`
+		ErrorDesc   string `json:"error_description"`
+	}
+	if err := json.Unmarshal(body, &jsonResp); err == nil && jsonResp.AccessToken != "" {
+		return jsonResp.AccessToken, jsonResp.IDToken, nil
+	}
+	if jsonResp.Error != "" {
+		return "", "", fmt.Errorf("CF error: %s — %s", jsonResp.Error, jsonResp.ErrorDesc)
+	}
+
+	// Fallback: URL-encoded form response
 	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return "", "", fmt.Errorf("failed to parse token response: %s", string(body))
+	if err == nil {
+		accessToken = values.Get("access_token")
+		idToken = values.Get("id_token")
+		if accessToken != "" {
+			return accessToken, idToken, nil
+		}
 	}
 
-	accessToken = values.Get("access_token")
-	idToken = values.Get("id_token")
-	if accessToken == "" {
-		return "", "", fmt.Errorf("no access_token in response: %s", string(body))
-	}
-
-	return accessToken, idToken, nil
+	return "", "", fmt.Errorf("unable to parse token response: %s", string(body))
 }
 
 // parseIDToken extracts CF user info from OIDC id_token (JWT without signature verification)
