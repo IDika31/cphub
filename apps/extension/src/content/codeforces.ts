@@ -171,3 +171,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 logger.info("Codeforces content script loaded");
+
+// Auto-sync on page load — if on a problem page, sync automatically
+(function autoSync() {
+  const detected = detectPageType();
+  if (detected.isProblem && detected.provider === "codeforces") {
+    // Small delay to ensure page is fully loaded
+    setTimeout(() => {
+      const data = scrapeProblem();
+      if (data) {
+        chrome.runtime.sendMessage({
+          type: MESSAGE_TYPES.SYNC_PROBLEM,
+          payload: {
+            provider: "codeforces",
+            type: "problem",
+            url: window.location.href,
+            data,
+          },
+        });
+        logger.info("Auto-synced problem:", data.title);
+      }
+    }, 1500);
+  }
+})();
