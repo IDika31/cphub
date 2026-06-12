@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/IDika31/cphub/api/internal/database"
 	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -24,32 +26,45 @@ type CFConfig struct {
 func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		code := c.Query("code")
+		state := c.Query("state")
+
 		if code == "" {
-			return c.Status(400).JSON(fiber.Map{"error": "Missing authorization code"})
+			errType := c.Query("error", "")
+			errDesc := c.Query("error_description", "")
+			log.Printf("[cf_oauth] authorization denied: error=%s desc=%s", errType, errDesc)
+			return c.Redirect("http://localhost:3000/connections?linked=codeforces&error="+errType, 302)
 		}
 
-		userIDStr := c.Locals("userId")
-		if userIDStr == nil {
-			return c.Status(401).JSON(fiber.Map{"error": "Not authenticated"})
+		if state == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "Missing state parameter"})
 		}
-		userID, _ := uuid.Parse(userIDStr.(string))
+
+		// Look up userID from Redis using state
+		redisCtx := c.Context()
+		userIDStr, err := database.Cache.Get(redisCtx, "cf_oauth:"+state).Result()
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"error":  "Invalid or expired state",
+				"detail": err.Error(),
+			})
+		}
+		// Clean up the state key
+		database.Cache.Del(redisCtx, "cf_oauth:"+state)
+
+		userID, _ := uuid.Parse(userIDStr)
 
 		// Step 1: Exchange code for access token
 		token, err := exchangeCFToken(code, cfg)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error":   "Failed to exchange token",
-				"detail":  err.Error(),
-			})
+			log.Printf("[cf_oauth] token exchange failed: %v", err)
+			return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=token_exchange", 302)
 		}
 
 		// Step 2: Fetch user info from CF API
 		cfUser, err := fetchCFUserInfo(token)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error":   "Failed to fetch Codeforces user info",
-				"detail":  err.Error(),
-			})
+			log.Printf("[cf_oauth] user info fetch failed: %v", err)
+			return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=user_fetch", 302)
 		}
 
 		// Step 3: Create or update LinkedAccount
@@ -57,30 +72,39 @@ func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 		var account model.LinkedAccount
 		result := db.Where("user_id = ? AND provider = ?", userID, "codeforces").First(&account)
 
-		account.UserID = userID
-		account.Provider = "codeforces"
-		account.ProviderUserID = cfUser.Handle
-		account.Handle = cfUser.Handle
-		account.AccessToken = token
-		account.Rating = cfUser.Rating
-		account.MaxRating = cfUser.MaxRating
-		account.AvatarURL = cfUser.Avatar
-		account.IsConnected = true
-
 		if result.Error != nil {
-			account.ID = uuid.New()
-			account.LinkedAt = now
+			account = model.LinkedAccount{
+				ID:             uuid.New(),
+				UserID:         userID,
+				Provider:       "codeforces",
+				ProviderUserID: cfUser.Handle,
+				Handle:         cfUser.Handle,
+				AccessToken:    token,
+				Rating:         cfUser.Rating,
+				MaxRating:      cfUser.MaxRating,
+				AvatarURL:      cfUser.Avatar,
+				IsConnected:    true,
+				LinkedAt:       now,
+			}
 			if err := db.Create(&account).Error; err != nil {
-				return c.Status(500).JSON(fiber.Map{"error": "Failed to save account"})
+				log.Printf("[cf_oauth] failed to create account: %v", err)
+				return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=db_error", 302)
 			}
 		} else {
+			account.AccessToken = token
+			account.Handle = cfUser.Handle
+			account.Rating = cfUser.Rating
+			account.MaxRating = cfUser.MaxRating
+			account.AvatarURL = cfUser.Avatar
+			account.IsConnected = true
 			if err := db.Save(&account).Error; err != nil {
-				return c.Status(500).JSON(fiber.Map{"error": "Failed to update account"})
+				log.Printf("[cf_oauth] failed to update account: %v", err)
+				return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=db_error", 302)
 			}
 		}
 
-		// Redirect back to frontend connections page
-		return c.Redirect("http://localhost:3000/connections?linked=codeforces", 302)
+		log.Printf("[cf_oauth] linked Codeforces account: %s (user=%s)", cfUser.Handle, userIDStr)
+		return c.Redirect("http://localhost:3000/connections?linked=codeforces&success=1", 302)
 	}
 }
 
@@ -118,8 +142,8 @@ func exchangeCFToken(code string, cfg CFConfig) (string, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[cf_oauth] token response: %s", string(body))
 
-	// CF token response is URL-encoded: access_token=xxx&expires_in=3600
 	values, err := url.ParseQuery(string(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to parse token response: %s", string(body))
@@ -134,7 +158,6 @@ func exchangeCFToken(code string, cfg CFConfig) (string, error) {
 }
 
 func fetchCFUserInfo(token string) (*CFUserInfo, error) {
-	// CF API requires API key+secret for user.info, but OAuth token works too
 	url := fmt.Sprintf(
 		"https://codeforces.com/api/user.info?oauth_token=%s",
 		token,
