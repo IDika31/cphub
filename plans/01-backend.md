@@ -8,13 +8,13 @@
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|
-| API-01 | Init Go module | ⬜ | `apps/api/go.mod` |
-| API-02 | Config loader (.env, struct) | ⬜ | `apps/api/internal/config/` |
-| API-03 | Database connection + health check (GORM + PostgreSQL) | ⬜ | `apps/api/internal/database/` |
-| API-04 | Redis connection + health check | ⬜ | `apps/api/internal/database/redis.go` |
-| API-05 | Migration runner (golang-migrate) | ⬜ | `apps/api/cmd/migrate.go` |
-| API-06 | Fiber server setup + graceful shutdown | ⬜ | `apps/api/internal/server/` |
-| API-07 | `main.go` entrypoint | ⬜ | `apps/api/cmd/main.go` |
+| API-01 | Init Go module | ✅ | `apps/api/go.mod` |
+| API-02 | Config loader (.env, struct) | ✅ | `apps/api/internal/config/` |
+| API-03 | Database connection + health check (GORM + PostgreSQL) | ✅ | `apps/api/internal/database/` |
+| API-04 | Redis connection + health check | ✅ | `apps/api/internal/database/redis.go` |
+| API-05 | Migration runner (golang-migrate) | ✅ | `apps/api/cmd/migrate.go` |
+| API-06 | Fiber server setup + graceful shutdown | ✅ | `apps/api/internal/server/` |
+| API-07 | `main.go` entrypoint | ✅ | `apps/api/cmd/main.go` |
 
 ## 1.2 Database — Models & Migrations
 

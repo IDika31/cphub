@@ -1,6 +1,6 @@
 # 03 — Browser Extension (`apps/extension/`)
 
-> **Status:** ⬜ (0/35)
+> **Status:** 🔵 (13/43) — Foundation + Background SW done
 
 ---
 
@@ -8,29 +8,29 @@
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|
-| EXT-01 | Init extension project (Bun + Vite + TypeScript) | ⬜ | `apps/extension/package.json` |
-| EXT-02 | Manifest V3 — permissions, host_permissions, content_scripts, background, popup | ⬜ | `apps/extension/manifest.json` |
-| EXT-03 | Vite build config — multi-entry (background, content, popup), HMR, code splitting | ⬜ | `apps/extension/vite.config.ts` |
-| EXT-04 | TypeScript strict config + shared types package | ⬜ | `apps/extension/tsconfig.json` |
-| EXT-05 | CSP compliance — `script-src 'self'`, no eval, no inline | ⬜ | `apps/extension/manifest.json` |
+| EXT-01 | Init extension project (Bun + Vite + TypeScript) | ✅ | `apps/extension/package.json` |
+| EXT-02 | Manifest V3 — permissions, host_permissions, content_scripts, background, popup | ✅ | `apps/extension/manifest.json` |
+| EXT-03 | Vite build config — multi-entry (background, content, popup), HMR, code splitting | ✅ | `apps/extension/vite.config.ts` |
+| EXT-04 | TypeScript strict config + shared types package | ✅ | `apps/extension/tsconfig.json` |
+| EXT-05 | CSP compliance — `script-src 'self'`, no eval, no inline | ✅ | `apps/extension/manifest.json` |
 | EXT-06 | Ikon set — 16/48/128 + action icon + badge | ⬜ | `apps/extension/public/icons/` |
 
 ## 3.2 Shared / Utilities
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|
-| EXT-07 | HMAC-SHA256 signing utility | ⬜ | `apps/extension/src/shared/crypto.ts` |
-| EXT-08 | Nonce generator + anti-replay (timestamp-based) | ⬜ | `apps/extension/src/shared/nonce.ts` |
-| EXT-09 | API client — POST ke local CPHub API dengan retry + timeout | ⬜ | `apps/extension/src/shared/api.ts` |
-| EXT-10 | Logger utility — level-based (debug/info/warn/error), console + storage log | ⬜ | `apps/extension/src/shared/logger.ts` |
-| EXT-11 | Storage wrapper — chrome.storage.local + chrome.storage.sync | ⬜ | `apps/extension/src/shared/storage.ts` |
-| EXT-12 | Message bus — typed message passing antar extension context | ⬜ | `apps/extension/src/shared/messages.ts` |
+| EXT-07 | HMAC-SHA256 signing utility | ✅ | `apps/extension/src/shared/crypto.ts` |
+| EXT-08 | Nonce generator + anti-replay (timestamp-based) | ✅ | `apps/extension/src/shared/crypto.ts` |
+| EXT-09 | API client — POST ke local CPHub API dengan retry + timeout | ✅ | `apps/extension/src/shared/api.ts` |
+| EXT-10 | Logger utility — level-based (debug/info/warn/error), console + storage log | ✅ | `apps/extension/src/shared/logger.ts` |
+| EXT-11 | Storage wrapper — chrome.storage.local + chrome.storage.sync | ✅ | `apps/extension/src/shared/storage.ts` |
+| EXT-12 | Message bus — typed message passing antar extension context | ✅ | `apps/extension/src/shared/messages.ts` |
 
 ## 3.3 Content Scripts — Scrapers
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|
-| EXT-13 | Auto-detect halaman soal — CF problem page + TLX problem page | ⬜ | `apps/extension/src/content/detector.ts` |
+| EXT-13 | Auto-detect halaman soal — CF problem page + TLX problem page | ✅ | `apps/extension/src/content/detector.ts` |
 | EXT-14 | Codeforces problem scraper — title, statement, I/O, constraints, tags, time/memory limit | ⬜ | `apps/extension/src/content/codeforces.ts` |
 | EXT-15 | Codeforces submission scraper — verdict, runtime, memory, language, timestamp | ⬜ | `apps/extension/src/content/codeforces.ts` |
 | EXT-16 | Codeforces user profile scraper — handle, rating, max rating, avatar | ⬜ | `apps/extension/src/content/codeforces.ts` |
@@ -44,7 +44,7 @@
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|
-| EXT-22 | Service worker lifecycle — install, activate, keep-alive via periodic ping | ⬜ | `apps/extension/src/background/index.ts` |
+| EXT-22 | Service worker lifecycle — install, activate, keep-alive via periodic ping | ✅ | `apps/extension/src/background/index.ts` |
 | EXT-23 | Message handler — route content script → background → API calls | ⬜ | `apps/extension/src/background/handler.ts` |
 | EXT-24 | Sync orchestrator — terima scrape result → sign HMAC → POST ke API → return status | ⬜ | `apps/extension/src/background/sync.ts` |
 | EXT-25 | Offline queue — simpan failed sync ke storage, retry saat online | ⬜ | `apps/extension/src/background/offline-queue.ts` |
