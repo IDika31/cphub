@@ -116,7 +116,7 @@ func registerRoutes(
 	sync.Post("/submission", syncHandler.SyncSubmission)
 
 	// Problems (public read, optional auth)
-	problems := app.Group("/api/problems", middleware.OptionalAuth(cfg.JWT))
+	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
 	problems.Get("/", problemHandler.List)
 	problems.Get("/search", problemHandler.Search)
 	problems.Get("/:id", problemHandler.GetByID)

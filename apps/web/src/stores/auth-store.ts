@@ -16,6 +16,7 @@ interface AuthState {
   loginWithGoogle: () => void;
   logout: () => void;
   setUser: (user: User) => void;
+  checkAuth: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -23,41 +24,67 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: true,
 
+  checkAuth: async () => {
+    try {
+      const token = localStorage.getItem("cphub_token");
+      if (!token) {
+        set({ isLoading: false });
+        return;
+      }
+      const res = await fetch("http://localhost:3001/api/auth/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set({ user: { id: data.userId, email: data.email, name: "" }, isAuthenticated: true, isLoading: false });
+      } else {
+        localStorage.removeItem("cphub_token");
+        set({ isLoading: false });
+      }
+    } catch {
+      set({ isLoading: false });
+    }
+  },
+
   login: async (email: string, password: string) => {
-    // TODO: API call to POST /api/auth/login
     set({ isLoading: true });
     try {
       const res = await fetch("http://localhost:3001/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
-        credentials: "include",
       });
-      if (!res.ok) throw new Error("Login failed");
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error((err as { error?: string }).error || "Login failed");
+      }
       const data = await res.json();
+      localStorage.setItem("cphub_token", data.accessToken);
       set({ user: data.user, isAuthenticated: true, isLoading: false });
-    } catch {
+    } catch (err) {
       set({ isLoading: false });
-      throw new Error("Login failed");
+      throw err;
     }
   },
 
   register: async (name: string, email: string, password: string) => {
-    // TODO: API call to POST /api/auth/register
     set({ isLoading: true });
     try {
       const res = await fetch("http://localhost:3001/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password }),
-        credentials: "include",
       });
-      if (!res.ok) throw new Error("Register failed");
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error((err as { error?: string }).error || "Register failed");
+      }
       const data = await res.json();
+      localStorage.setItem("cphub_token", data.accessToken);
       set({ user: data.user, isAuthenticated: true, isLoading: false });
-    } catch {
+    } catch (err) {
       set({ isLoading: false });
-      throw new Error("Register failed");
+      throw err;
     }
   },
 
@@ -66,8 +93,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    localStorage.removeItem("cphub_token");
     set({ user: null, isAuthenticated: false });
   },
 
-  setUser: (user: User) => set({ user, isAuthenticated: true, isLoading: false }),
+  setUser: (user: User) =>
+    set({ user, isAuthenticated: true, isLoading: false }),
 }));
