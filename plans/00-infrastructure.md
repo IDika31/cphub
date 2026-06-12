@@ -1,6 +1,6 @@
 # 00 — Monorepo Setup & Infrastructure
 
-> **Status:** 🔵 (5/7) — INF-06, INF-07 remaining (firejail — requires sudo)
+> **Status:** 5/7 (INF-06, INF-07 require sudo)
 
 | ID | Task | Status | File/Lokasi |
 |----|------|--------|-------------|

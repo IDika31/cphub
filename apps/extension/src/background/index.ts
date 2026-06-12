@@ -1,12 +1,12 @@
 import { logger } from "../shared/logger";
 import { MESSAGE_TYPES, type Message } from "../shared/messages";
-import { syncToAPI, type SyncPayload } from "../shared/api";
-import { pushToOfflineQueue, incrementSyncedCount } from "../shared/storage";
-import { updateBadge } from "./badge";
+import type { SyncPayload } from "../shared/api";
+import { handleMessage } from "./handler";
+import { registerAlarms, handleAlarm } from "./alarm";
 
 chrome.runtime.onInstalled.addListener(() => {
   logger.info("Extension installed/updated");
-  chrome.alarms.create("health-ping", { periodInMinutes: 5 });
+  registerAlarms();
   chrome.contextMenus.create({
     id: "sync-problem",
     title: "Sync this problem to CPHub",
@@ -26,61 +26,11 @@ chrome.runtime.onMessage.addListener(
       .catch((err) =>
         sendResponse({ success: false, error: err.message }),
       );
-    return true; // async response
+    return true;
   },
 );
 
-async function handleMessage(
-  message: Message<SyncPayload>,
-): Promise<{ success: boolean; data?: unknown; error?: string }> {
-  switch (message.type) {
-    case MESSAGE_TYPES.SYNC_PROBLEM:
-    case MESSAGE_TYPES.SYNC_SUBMISSION:
-    case MESSAGE_TYPES.SYNC_PROFILE: {
-      if (!message.payload) {
-        return { success: false, error: "Missing payload" };
-      }
-      try {
-        const result = await syncToAPI(message.payload);
-        await incrementSyncedCount();
-        await updateBadge("success");
-        return { success: true, data: result };
-      } catch (err) {
-        logger.error("Sync failed, queuing offline", err);
-        await pushToOfflineQueue(message.payload);
-        await updateBadge("error");
-        return {
-          success: false,
-          error: (err as Error).message,
-        };
-      }
-    }
-    case MESSAGE_TYPES.GET_STATUS: {
-      const syncedCount = await (await import("../shared/storage")).getSyncedCount();
-      return {
-        success: true,
-        data: {
-          syncedCount,
-          extensionVersion: chrome.runtime.getManifest().version,
-        },
-      };
-    }
-    default:
-      return { success: false, error: `Unknown message type: ${message.type}` };
-  }
-}
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === "health-ping") {
-    try {
-      const { pingAPI } = await import("../shared/api");
-      await pingAPI();
-      await updateBadge("ok");
-    } catch {
-      await updateBadge("error");
-    }
-  }
-});
+chrome.alarms.onAlarm.addListener(handleAlarm);
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "sync-current-problem") {
@@ -89,9 +39,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       currentWindow: true,
     });
     if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: MESSAGE_TYPES.SYNC_PROBLEM,
-      });
+      chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
     }
   }
   if (command === "open-dashboard") {
@@ -101,8 +49,6 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "sync-problem" && tab?.id) {
-    chrome.tabs.sendMessage(tab.id, {
-      type: MESSAGE_TYPES.SYNC_PROBLEM,
-    });
+    chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
   }
 });
