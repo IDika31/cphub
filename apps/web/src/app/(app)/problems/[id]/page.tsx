@@ -12,14 +12,14 @@ import MonacoEditor from "@/components/editor/monaco-editor";
 import ProblemStatement from "@/components/editor/problem-statement";
 import { fetchProblem } from "@/lib/api/problems";
 import { runCode, type GraderResult } from "@/lib/api/grader";
-import { getDefaultTemplate } from "@/lib/template";
+import { getDefaultTemplate, applyTemplate } from "@/lib/template";
 import { saveToLocalStorage, loadFromLocalStorage, debounce } from "@/lib/auto-save";
 import { apiClient } from "@/lib/api/client";
 import type { Problem } from "@/lib/api/types";
 
 const LANGUAGES = [
-  { value: "cpp17", label: "C++17" },
   { value: "cpp20", label: "C++20" },
+  { value: "cpp17", label: "C++17" },
   { value: "python3", label: "Python 3" },
   { value: "java21", label: "Java 21" },
   { value: "nodejs", label: "JavaScript" },
@@ -34,7 +34,7 @@ export default function ProblemDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [language, setLanguage] = useState("cpp17");
+  const [language, setLanguage] = useState("cpp20");
   const [code, setCode] = useState("");
   const [result, setResult] = useState<GraderResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -54,7 +54,13 @@ export default function ProblemDetailPage() {
         setProblem(p);
         const pid = p.id || id;
         const saved = loadFromLocalStorage(pid, language);
-        setCode(saved || getDefaultTemplate(language));
+        if (!saved) {
+          const tpl = getDefaultTemplate(language);
+          const vars = { provider: p.provider || "cf", problemId: p.problemId || id, title: p.title || "" };
+          setCode(applyTemplate(tpl, vars));
+        } else {
+          setCode(saved);
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -105,12 +111,20 @@ export default function ProblemDetailPage() {
   }
 
   function handleTemplate() {
-    setCode(getDefaultTemplate(language));
+    const tpl = getDefaultTemplate(language);
+    const vars = { provider: problem?.provider || "cf", problemId: problem?.problemId || id, title: problem?.title || "" };
+    setCode(applyTemplate(tpl, vars));
   }
 
   function handleReset() {
     const saved = loadFromLocalStorage(id, language);
-    setCode(saved || getDefaultTemplate(language));
+    if (saved) {
+      setCode(saved);
+    } else {
+      const tpl = getDefaultTemplate(language);
+      const vars = { provider: problem?.provider || "cf", problemId: problem?.problemId || id, title: problem?.title || "" };
+      setCode(applyTemplate(tpl, vars));
+    }
     setResult(null);
   }
 
