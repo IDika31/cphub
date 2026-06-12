@@ -136,6 +136,7 @@ auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	problems.Get("/", problemHandler.List)
 	problems.Get("/search", problemHandler.Search)
 	problems.Get("/:id", problemHandler.GetByID)
+	problems.Get("/by-provider/:provider/:problemId", problemHandler.GetByProviderAndID)
 
 	// Grader
 	graderGroup := app.Group("/api/grader", middleware.AuthRequired(cfg.JWT))
