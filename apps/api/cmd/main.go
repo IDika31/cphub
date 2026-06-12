@@ -110,13 +110,20 @@ func registerRoutes(
 	auth := app.Group("/api/auth")
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/login", authHandler.Login)
-	auth.Get("/google", authHandler.GoogleLogin)
+	auth.Get("/google", func(c *fiber.Ctx) error {
+		redirectURL := "https://accounts.google.com/o/oauth2/v2/auth" +
+			"?client_id=" + cfg.Google.ClientID +
+			"&redirect_uri=" + cfg.Google.RedirectURL +
+			"&response_type=code" +
+			"&scope=openid%20email%20profile"
+		return c.Redirect(redirectURL, 302)
+	})
 	auth.Get("/google/callback", authHandler.GoogleCallback)
 	auth.Get("/codeforces", func(c *fiber.Ctx) error {
 		redirectURL := "https://codeforces.com/oauth/authorize" +
 			"?response_type=code" +
-			"&client_id=" + c.Query("client_id", "") +
-			"&redirect_uri=" + c.Query("redirect_uri", cfg.Server.BaseURL+"/api/auth/codeforces/callback") +
+			"&client_id=" + cfg.CF.ClientID +
+			"&redirect_uri=" + cfg.CF.RedirectURL +
 			"&scope=read"
 		return c.Redirect(redirectURL, 302)
 	})
