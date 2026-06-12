@@ -1,34 +1,20 @@
 import { MESSAGE_TYPES } from "../shared/messages";
-import { detectPageType, observeNavigation } from "./detector";
+import { detectPageType } from "./detector";
 import { logger } from "../shared/logger";
 
-// Scrape Codeforces problem page
 function scrapeProblem(): Record<string, unknown> | null {
   try {
     const titleEl = document.querySelector(".problem-statement .header .title");
     if (!titleEl) return null;
-
     const title = titleEl.textContent?.trim() || "";
-    const statement = document.querySelector(".problem-statement")?.textContent?.trim() || "";
-
-    // Time & memory limit
-    const timeLimitEl = document.querySelector(".time-limit");
-    const memLimitEl = document.querySelector(".memory-limit");
-    const timeLimit = timeLimitEl?.textContent?.replace("time limit per test", "").trim() || "";
-    const memoryLimit = memLimitEl?.textContent?.replace("memory limit per test", "").trim() || "";
-
-    // Tags
+    const timeEl = document.querySelector(".time-limit");
+    const memEl = document.querySelector(".memory-limit");
     const tagEls = document.querySelectorAll(".tag-box");
     const tags = Array.from(tagEls).map((el) => el.textContent?.trim() || "").filter(Boolean);
 
-    // Input/Output specs
-    const inputSpec = document.querySelector(".input-specification")?.textContent?.trim() || "";
-    const outputSpec = document.querySelector(".output-specification")?.textContent?.trim() || "";
-
-    // Sample test cases
     const sampleInputs = document.querySelectorAll(".input pre");
     const sampleOutputs = document.querySelectorAll(".output pre");
-    const testCases = [];
+    const testCases: Array<{ input: string; output: string; isSample: boolean }> = [];
     for (let i = 0; i < Math.min(sampleInputs.length, sampleOutputs.length); i++) {
       testCases.push({
         input: sampleInputs[i].textContent?.trim() || "",
@@ -37,23 +23,18 @@ function scrapeProblem(): Record<string, unknown> | null {
       });
     }
 
-    // Problem ID from URL
     const urlParts = window.location.pathname.split("/");
     const problemId = urlParts[urlParts.length - 1] || "";
 
-    // Difficulty from problem index (rough estimate)
-    const difficulty = 800; // CF default
-
     return {
-      provider: "codeforces",
       problemId,
       title,
-      statement,
-      inputSpec,
-      outputSpec,
-      difficulty,
-      timeLimit,
-      memoryLimit,
+      statement: document.querySelector(".problem-statement")?.textContent?.trim() || "",
+      inputSpec: document.querySelector(".input-specification")?.textContent?.trim() || "",
+      outputSpec: document.querySelector(".output-specification")?.textContent?.trim() || "",
+      difficulty: 0,
+      timeLimit: timeEl?.textContent?.replace("time limit per test", "").trim() || "",
+      memoryLimit: memEl?.textContent?.replace("memory limit per test", "").trim() || "",
       tags: JSON.stringify(tags),
       url: window.location.href,
       testCases,
@@ -64,32 +45,6 @@ function scrapeProblem(): Record<string, unknown> | null {
   }
 }
 
-// Scrape Codeforces submission page
-function scrapeSubmission(): Record<string, unknown> | null {
-  try {
-    const rows = document.querySelectorAll("table.status-frame-datatable tr");
-    const submissions = [];
-    for (let i = 1; i < rows.length; i++) {
-      const cells = rows[i].querySelectorAll("td");
-      if (cells.length < 6) continue;
-      submissions.push({
-        submissionId: cells[0].textContent?.trim() || "",
-        problemTitle: cells[3].textContent?.trim() || "",
-        problemRef: "",
-        language: cells[4].textContent?.trim() || "",
-        verdict: cells[5].textContent?.trim() || "",
-        runtime: parseInt(cells[6].textContent?.replace("ms", "") || "0"),
-        memory: parseInt(cells[7].textContent?.replace("KB", "") || "0"),
-      });
-    }
-    return { provider: "codeforces", type: "submission", submissions };
-  } catch (err) {
-    logger.error("Failed to scrape CF submissions", err);
-    return null;
-  }
-}
-
-// Listen for sync requests from popup/background
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === MESSAGE_TYPES.SYNC_PROBLEM) {
     const detected = detectPageType();
@@ -102,9 +57,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: false, error: "Failed to scrape problem" });
       return true;
     }
+    // Wrap in SyncPayload format expected by background
     chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.SYNC_PROBLEM,
-      payload: data,
+      payload: {
+        provider: "codeforces",
+        type: "problem",
+        url: window.location.href,
+        data,
+      },
     });
     sendResponse({ success: true, data: { title: data.title } });
   }

@@ -119,7 +119,10 @@ func registerRoutes(
 		return c.Redirect(redirectURL, 302)
 	})
 	auth.Get("/google/callback", authHandler.GoogleCallback)
-	auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
+	auth.Get("/hmac-secret", middleware.AuthRequired(cfg.JWT), func(c *fiber.Ctx) error {
+    return c.JSON(fiber.Map{"secret": cfg.Extension.HMACSecret})
+})
+auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	auth.Post("/logout", middleware.AuthRequired(cfg.JWT), authHandler.Logout)
 
 	// Sync (HMAC protected)
