@@ -1,0 +1,26 @@
+{
+  "name": "cphub",
+  "version": "4.0.0",
+  "private": true,
+  "description": "CPHub V4 — Competitive Programming Hub: integrated Codeforces + TLX TOKI workflow",
+  "scripts": {
+    "dev:api": "cd apps/api && go run ./cmd/main.go",
+    "dev:web": "cd apps/web && bun dev",
+    "dev:ext": "cd apps/extension && bun dev",
+    "build:web": "cd apps/web && bun run build",
+    "build:ext": "cd apps/extension && bun run build",
+    "test:api": "cd apps/api && go test ./...",
+    "test:web": "cd apps/web && bun test",
+    "db:migrate": "cd apps/api && go run ./cmd/migrate.go",
+    "db:migrate:down": "cd apps/api && go run ./cmd/migrate.go -down",
+    "infra:up": "docker compose -f docker-compose.yml up -d",
+    "infra:down": "docker compose -f docker-compose.yml down",
+    "infra:logs": "docker compose -f docker-compose.yml logs -f",
+    "lint:api": "cd apps/api && golangci-lint run",
+    "lint:web": "cd apps/web && bun lint",
+    "clean": "rm -rf apps/web/.next apps/extension/dist apps/api/tmp"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
