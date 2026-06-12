@@ -35,7 +35,11 @@ export default function ProblemDetailPage() {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
   const [language, setLanguage] = useState("cpp20");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(() => {
+    // Load saved code or default template immediately
+    const saved = typeof window !== "undefined" && id ? loadFromLocalStorage(id, "cpp20") : null;
+    return saved || getDefaultTemplate("cpp20");
+  });
   const [result, setResult] = useState<GraderResult | null>(null);
   const [running, setRunning] = useState(false);
   const [tab, setTab] = useState<"grader" | "testcases">("grader");
@@ -52,8 +56,8 @@ export default function ProblemDetailPage() {
     promise
       .then((p) => {
         setProblem(p);
-        const pid = p.id || id;
-        const saved = loadFromLocalStorage(pid, language);
+        // Use URL id as key — consistent between save and load
+        const saved = loadFromLocalStorage(id, language);
         if (!saved) {
           const tpl = getDefaultTemplate(language);
           const vars = { provider: p.provider || "cf", problemId: p.problemId || id, title: p.title || "" };
@@ -113,7 +117,9 @@ export default function ProblemDetailPage() {
   function handleTemplate() {
     const tpl = getDefaultTemplate(language);
     const vars = { provider: problem?.provider || "cf", problemId: problem?.problemId || id, title: problem?.title || "" };
-    setCode(applyTemplate(tpl, vars));
+    const newCode = applyTemplate(tpl, vars);
+    setCode(newCode);
+    if (id) saveToLocalStorage(id, language, newCode);
   }
 
   function handleReset() {
