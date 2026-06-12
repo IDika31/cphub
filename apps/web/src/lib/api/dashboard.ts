@@ -5,6 +5,8 @@ export interface DashboardOverview {
   attempted: number;
   streak: number;
   accuracy: number;
+  cfHandle: string;
+  cfRating: number;
 }
 
 export async function fetchDashboardOverview(): Promise<DashboardOverview> {
