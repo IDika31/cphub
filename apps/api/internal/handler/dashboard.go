@@ -116,31 +116,69 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Codeforces not connected"})
 	}
 
-	url := fmt.Sprintf("https://codeforces.com/api/user.status?handle=%s&from=1&count=200", handle)
-	resp, err := http.Get(url)
+	subs, err := FetchCFSubmissions(handle, 300)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "CF API error"})
 	}
-	defer resp.Body.Close()
 
-	var cfResp CFStatusResponse
-	json.NewDecoder(resp.Body).Decode(&cfResp)
+	problemCount := 0
+	subCount := 0
+	seenProblems := make(map[string]bool)
 
-	count := 0
-	for _, sub := range cfResp.Result {
-		problemRef := sub.Problem.Name
-		h.db.Table("problem_logs").Where("user_id = ? AND problem_id = ? AND action = ?", userID, problemRef, sub.Verdict).
-			FirstOrCreate(&struct {
-				ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid()"`
-				UserID    uuid.UUID
-				ProblemID string
-				Action    string
-			}{UserID: userID, ProblemID: problemRef, Action: sub.Verdict})
-		count++
+	for _, sub := range subs {
+		problemKey := fmt.Sprintf("%d%s", sub.Problem.ContestID, sub.Problem.Index)
+
+		// Store unique problems
+		if !seenProblems[problemKey] {
+			seenProblems[problemKey] = true
+			tagsJSON, _ := json.Marshal(sub.Problem.Tags)
+			problem := struct {
+				ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid()"`
+				Provider    string
+				ProblemID   string
+				Title       string
+				Difficulty  int
+				Tags        string
+				URL         string
+			}{
+				Provider:   "codeforces",
+				ProblemID:  problemKey,
+				Title:      fmt.Sprintf("%s. %s", sub.Problem.Index, sub.Problem.Name),
+				Difficulty: sub.Problem.Rating,
+				Tags:       string(tagsJSON),
+				URL:        fmt.Sprintf("https://codeforces.com/problemset/problem/%d/%s", sub.Problem.ContestID, sub.Problem.Index),
+			}
+			h.db.Table("problems").Where("provider = ? AND problem_id = ?", "codeforces", problemKey).
+				FirstOrCreate(&problem)
+			problemCount++
+		}
+
+		// Store submissions
+		submission := struct {
+			ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid()"`
+			UserID       uuid.UUID
+			Provider     string
+			SubmissionID string
+			ProblemTitle string
+			ProblemRef   string
+			Language     string
+			Verdict      string
+		}{
+			UserID:       userID,
+			Provider:     "codeforces",
+			SubmissionID: fmt.Sprintf("%d", sub.ID),
+			ProblemTitle: fmt.Sprintf("%s. %s", sub.Problem.Index, sub.Problem.Name),
+			ProblemRef:   problemKey,
+			Language:     sub.ProgrammingLanguage,
+			Verdict:      sub.Verdict,
+		}
+		h.db.Table("external_submissions").Where("provider = ? AND submission_id = ?", "codeforces", fmt.Sprintf("%d", sub.ID)).
+			FirstOrCreate(&submission)
+		subCount++
 	}
 
-	log.Printf("[sync] synced %d CF submissions for user %s", count, userIDStr)
-	return c.JSON(fiber.Map{"status": "ok", "synced": count})
+	log.Printf("[sync] synced %d problems + %d submissions for user %s", problemCount, subCount, userIDStr)
+	return c.JSON(fiber.Map{"status": "ok", "problems": problemCount, "submissions": subCount})
 }
 
 func (h *DashboardHandler) RatingHistory(c *fiber.Ctx) error {
