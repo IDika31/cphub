@@ -44,12 +44,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.SYNC_PROBLEM,
-      payload: {
-        provider: "tlx",
-        type: "problem",
-        url: window.location.href,
-        data,
-      },
+      payload: { ...data, type: "problem" },
     });
     sendResponse({ success: true, data: { title: data.title } });
   }
@@ -69,14 +64,9 @@ let lastTlxUrl = "";
       if (data) {
         chrome.runtime.sendMessage({
           type: MESSAGE_TYPES.SYNC_PROBLEM,
-          payload: {
-            provider: "tlx",
-            type: "problem",
-            url: window.location.href,
-            data,
-          },
+          payload: { ...data, type: "problem" },
         });
-        logger.info("Auto-synced TLX problem:", data.title);
+        logger.info("Auto-synced TLX problem:", (data as any).title);
       }
     }, 1500);
   }
