@@ -62,6 +62,7 @@ func (h *AccountHandler) LinkCodeforces(c *fiber.Ctx) error {
 		"?response_type=code" +
 		"&client_id=" + url.QueryEscape(h.cfClientID) +
 		"&redirect_uri=" + url.QueryEscape(h.cfRedirectURL) +
+		"&scope=openid" +
 		"&state=" + url.QueryEscape(state)
 
 	return c.JSON(fiber.Map{
