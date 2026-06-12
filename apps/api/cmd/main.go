@@ -108,6 +108,14 @@ func registerRoutes(
 	auth.Post("/login", authHandler.Login)
 	auth.Get("/google", authHandler.GoogleLogin)
 	auth.Get("/google/callback", authHandler.GoogleCallback)
+	auth.Get("/codeforces", func(c *fiber.Ctx) error {
+		redirectURL := "https://codeforces.com/oauth/authorize" +
+			"?response_type=code" +
+			"&client_id=" + c.Query("client_id", "") +
+			"&redirect_uri=" + c.Query("redirect_uri", cfg.Server.BaseURL+"/api/auth/codeforces/callback") +
+			"&scope=read"
+		return c.Redirect(redirectURL, 302)
+	})
 	auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	auth.Post("/logout", middleware.AuthRequired(cfg.JWT), authHandler.Logout)
 
