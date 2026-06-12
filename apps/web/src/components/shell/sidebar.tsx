@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
   Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown,
@@ -27,8 +27,10 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/extension", label: "Extension", icon: Puzzle },
 ];
 
-export default function Sidebar() {
+function SidebarInner() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const providerParam = searchParams.get("provider") || "";
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(["problems"]));
@@ -103,7 +105,7 @@ export default function Sidebar() {
                       key={p.provider}
                       href={`${item.href}?provider=${p.provider}`}
                       className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                        pathname.includes(p.provider) ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
+                        providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
                       }`}
                     >
                       {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
@@ -137,5 +139,13 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+export default function Sidebar() {
+  return (
+    <Suspense fallback={<div className="w-[220px] bg-[#18181b]" />}>
+      <SidebarInner />
+    </Suspense>
   );
 }

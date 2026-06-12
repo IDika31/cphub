@@ -7,7 +7,7 @@ import Badge from "@/components/ui/badge";
 import Skeleton from "@/components/ui/skeleton";
 import Modal from "@/components/ui/modal";
 import { fetchConnections, unlinkAccount, type LinkedAccount } from "@/lib/api/connections";
-import { apiClient } from "@/lib/api/client";
+import { apiClient, API_BASE_URL } from "@/lib/api/client";
 
 interface ProviderRow {
   name: string;
