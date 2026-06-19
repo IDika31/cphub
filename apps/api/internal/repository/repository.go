@@ -70,6 +70,13 @@ func (r *ProblemRepository) FindByProviderAndID(provider, problemID string) (*mo
 	return &p, nil
 }
 
+func (r *ProblemRepository) FindByProblemID(problemID string) (*model.Problem, error) {
+	var p model.Problem
+	err := r.db.Where("problem_id = ?", problemID).Preload("TestCases").First(&p).Error
+	if err != nil { return nil, err }
+	return &p, nil
+}
+
 func (r *ProblemRepository) Upsert(p *model.Problem) error {
 	existing, err := r.FindByProviderAndID(p.Provider, p.ProblemID)
 	if err != nil {
@@ -104,7 +111,7 @@ func (r *SubmissionRepository) FindLocalByUser(userID uuid.UUID, limit, offset i
 	var subs []model.LocalSubmission
 	var total int64
 	r.db.Model(&model.LocalSubmission{}).Where("user_id = ?", userID).Count(&total)
-	err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Limit(limit).Offset(offset).Find(&subs).Error
+	err := r.db.Preload("Problem").Where("user_id = ?", userID).Order("created_at DESC").Limit(limit).Offset(offset).Find(&subs).Error
 	return subs, total, err
 }
 
