@@ -107,15 +107,31 @@ func Run(ctx context.Context, lang Language, td *TempDir, input string) (*Execut
 }
 
 // RunFirejail executes via firejail sandbox
-func RunFirejail(ctx context.Context, lang Language, td *TempDir, input string, firejailProfile string) (*ExecutionResult, error) {
+func RunFirejail(ctx context.Context, lang Language, td *TempDir, input string, firejailProfile string, memoryLimitMB int) (*ExecutionResult, error) {
 	cfg := lang.Config()
 	start := time.Now()
+
+	// NOTE: do NOT pass firejail --timeout. firejail's --timeout keeps the sandbox
+	// alive for the full duration even after the child exits (and holds stdin),
+	// turning every run into a TLE. Wall-clock limits are enforced by the Go
+	// context (exec.CommandContext) which SIGKILLs firejail on deadline; firejail's
+	// PID namespace then tears down the child. TLE is detected via ctx.Err().
+
+	// Derive firejail --rlimit-as (bytes) for dynamic per-problem memory cap.
+	if memoryLimitMB <= 0 {
+		memoryLimitMB = 512
+	}
+	memArg := fmt.Sprintf("--rlimit-as=%d", int64(memoryLimitMB)*1024*1024)
 
 	firejailArgs := []string{
 		fmt.Sprintf("--profile=%s", firejailProfile),
 		"--quiet",
-		cfg.RunCmd,
+		// private-tmp in the profile mounts a fresh empty /tmp inside the sandbox,
+		// which would hide the run dir (and ./solution). Whitelist keeps it visible.
+		fmt.Sprintf("--whitelist=%s", td.Path),
+		memArg,
 	}
+	firejailArgs = append(firejailArgs, cfg.RunCmd)
 	firejailArgs = append(firejailArgs, cfg.RunArgs...)
 
 	cmd := exec.CommandContext(ctx, "/usr/bin/firejail", firejailArgs...)

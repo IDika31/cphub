@@ -30,7 +30,7 @@ var Languages = map[Language]LangConfig{
 	LangCPP17: {
 		Extension:   ".cpp",
 		CompileCmd:  "/usr/bin/g++",
-		CompileArgs: []string{"-std=c++17", "-O2", "-Wall", "-fsanitize=address,undefined", "-o", "solution", "source.cpp"},
+		CompileArgs: []string{"-std=c++17", "-O2", "-Wall", "-fsanitize=undefined", "-o", "solution", "source.cpp"},
 		RunCmd:      "./solution",
 		RunArgs:     []string{},
 		IsCompiled:  true,
@@ -40,7 +40,7 @@ var Languages = map[Language]LangConfig{
 	LangCPP20: {
 		Extension:   ".cpp",
 		CompileCmd:  "/usr/bin/g++",
-		CompileArgs: []string{"-std=c++20", "-O2", "-Wall", "-fsanitize=address,undefined", "-o", "solution", "source.cpp"},
+		CompileArgs: []string{"-std=c++20", "-O2", "-Wall", "-fsanitize=undefined", "-o", "solution", "source.cpp"},
 		RunCmd:      "./solution",
 		RunArgs:     []string{},
 		IsCompiled:  true,
