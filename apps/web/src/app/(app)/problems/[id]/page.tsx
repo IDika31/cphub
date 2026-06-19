@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Play, RotateCcw, FileCode } from "lucide-react";
+import { Play, RotateCcw, FileCode, Plus, Trash2, UploadCloud } from "lucide-react";
 import Topbar from "@/components/shell/topbar";
 import Badge, { VerdictBadge } from "@/components/ui/badge";
 import Button from "@/components/ui/button";
@@ -10,8 +10,10 @@ import Select from "@/components/ui/select";
 import Skeleton from "@/components/ui/skeleton";
 import MonacoEditor from "@/components/editor/monaco-editor";
 import ProblemStatement from "@/components/editor/problem-statement";
+import SubmitPopup from "@/components/ui/submit-popup";
 import { fetchProblem } from "@/lib/api/problems";
 import { runCode, type GraderResult } from "@/lib/api/grader";
+import { submitTLX, type SubmitTLXResult } from "@/lib/api/tlx";
 import { getDefaultTemplate, applyTemplate } from "@/lib/template";
 import { saveToLocalStorage, loadFromLocalStorage, debounce } from "@/lib/auto-save";
 import { apiClient } from "@/lib/api/client";
@@ -38,7 +40,41 @@ export default function ProblemDetailPage() {
   const [code, setCode] = useState("");
   const [result, setResult] = useState<GraderResult | null>(null);
   const [running, setRunning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitTLXResult | null>(null);
+  const [popupOpen, setPopupOpen] = useState(false);
   const [tab, setTab] = useState<"grader" | "testcases">("grader");
+  const [customTests, setCustomTests] = useState<{ input: string; output: string }[]>([]);
+
+  // Load custom test cases (manual, persisted per problem) — provider-agnostic
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const raw = localStorage.getItem(`cphub_customtests_${id}`);
+      setCustomTests(raw ? (JSON.parse(raw) as { input: string; output: string }[]) : []);
+    } catch {
+      setCustomTests([]);
+    }
+  }, [id]);
+
+  function persistCustomTests(next: { input: string; output: string }[]) {
+    setCustomTests(next);
+    if (id) localStorage.setItem(`cphub_customtests_${id}`, JSON.stringify(next));
+  }
+
+  function addCustomTest() {
+    persistCustomTests([...customTests, { input: "", output: "" }]);
+    setTab("testcases");
+  }
+
+  function updateCustomTest(i: number, field: "input" | "output", value: string) {
+    const next = customTests.map((t, idx) => (idx === i ? { ...t, [field]: value } : t));
+    persistCustomTests(next);
+  }
+
+  function removeCustomTest(i: number) {
+    persistCustomTests(customTests.filter((_, idx) => idx !== i));
+  }
 
   // Load problem
   useEffect(() => {
@@ -48,9 +84,10 @@ export default function ProblemDetailPage() {
     const token = getToken();
     const promise = isUuid
       ? fetchProblem(id)
-      : apiClient('/api/problems/by-provider/codeforces/' + id, { token });
+      : apiClient('/api/problems/by-problem-id/' + id, { token });
     promise
-      .then((p) => {
+      .then((raw) => {
+        const p = raw as Problem;
         setProblem(p);
         const saved = loadFromLocalStorage(id, language);
         // Ignore saved code that still has raw placeholders (from buggy version)
@@ -63,7 +100,7 @@ export default function ProblemDetailPage() {
             provider: p.provider || "cf",
             problemId: p.problemId || id,
             title: p.title || "",
-            problemGroup: (p as Record<string,string>).problemGroup || "",
+            problemGroup: (p as unknown as Record<string, string>).problemGroup || "",
           };
           setCode(applyTemplate(tpl, vars));
         }
@@ -102,10 +139,13 @@ export default function ProblemDetailPage() {
     setResult(null);
     setTab("grader");
     try {
-      const testCases = (problem?.testCases || []).map((tc) => ({
-        input: tc.input,
-        output: tc.output,
-      }));
+      const testCases = [
+        ...(problem?.testCases || []).map((tc) => ({
+          input: tc.input,
+          output: tc.output,
+        })),
+        ...customTests.filter((t) => t.input !== "" || t.output !== ""),
+      ];
       if (testCases.length === 0) {
         // If no test cases, run with empty
         testCases.push({ input: "", output: "" });
@@ -113,12 +153,36 @@ export default function ProblemDetailPage() {
       const timeout = parseInt(problem?.timeLimit || "5") || 5;
       const memLimit = parseInt(problem?.memoryLimit || "512") || 512;
       const res = await runCode(
-        { language, sourceCode: code, testCases, timeoutSeconds: timeout, memoryLimitMB: memLimit },
+        { language, sourceCode: code, testCases, timeoutSeconds: timeout, memoryLimitMB: memLimit, problemId: problem?.id || id },
         getToken(),
       );
       setResult(res);
     } catch {}
     setRunning(false);
+  }
+
+  async function handleSubmitTLX() {
+    if (!code.trim() || !problem) return;
+    setSubmitting(true);
+    setSubmitResult(null);
+    setPopupOpen(true);
+    try {
+      const res = await submitTLX(problem.id, code, language, getToken());
+      setSubmitResult(res);
+      if (res.verdict === "AC") {
+        setProblem({ ...problem, status: "solved" });
+      }
+    } catch (err: unknown) {
+      setSubmitResult({
+        submissionJid: "",
+        verdict: "ERR",
+        score: 0,
+        pending: false,
+        url: "",
+      });
+      console.error("TLX submit failed", err);
+    }
+    setSubmitting(false);
   }
 
   function handleTemplate() {
@@ -174,6 +238,26 @@ export default function ProblemDetailPage() {
             <Button variant="primary" onClick={handleRun} disabled={running}>
               <Play className="w-3 h-3" /> {running ? "Running..." : "Run"}
             </Button>
+            {problem.provider === "tlx" && (
+              <Button variant="default" onClick={handleSubmitTLX} disabled={submitting}>
+                <UploadCloud className="w-3 h-3" /> {submitting ? "Submitting..." : "Submit TLX"}
+              </Button>
+            )}
+            {submitResult && (
+              submitResult.verdict === "ERR" ? (
+                <button onClick={() => setPopupOpen(true)}>
+                  <Badge variant="verdict-re">Submit gagal</Badge>
+                </button>
+              ) : submitResult.pending ? (
+                <button onClick={() => setPopupOpen(true)}>
+                  <Badge variant="verdict-pending">TLX: grading...</Badge>
+                </button>
+              ) : (
+                <button onClick={() => setPopupOpen(true)} title="Lihat hasil submit">
+                  <VerdictBadge verdict={submitResult.verdict} />
+                </button>
+              )
+            )}
           </>
         )}
       </Topbar>
@@ -255,13 +339,19 @@ export default function ProblemDetailPage() {
         <div className="flex-1 flex flex-col min-w-0">
           {/* Editor */}
           <div className="flex-[3] min-h-0">
-            <MonacoEditor
-              key={id}
-              value={code}
-              language={language}
-              onChange={handleCodeChange}
-              onRun={handleRun}
-            />
+            {loading ? (
+              <div className="h-full flex items-center justify-center bg-[#0f0f10]">
+                <div className="text-[13px] text-[#52525b] animate-pulse">Loading editor...</div>
+              </div>
+            ) : (
+              <MonacoEditor
+                key={id}
+                value={code || getDefaultTemplate(language)}
+                language={language}
+                onChange={handleCodeChange}
+                onRun={handleRun}
+              />
+            )}
           </div>
 
           {/* Row Resize */}
@@ -302,16 +392,18 @@ export default function ProblemDetailPage() {
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`px-[16px] text-[12px] font-medium flex items-center gap-[6px] h-[32px] transition-colors ${
+                  role="tab"
+                  aria-selected={tab === t}
+                  className={`px-[16px] text-[12px] font-medium flex items-center gap-[6px] h-[32px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b5cf6] ${
                     tab === t
                       ? "text-[#8b5cf6] border-b-2 border-[#8b5cf6]"
-                      : "text-[#71717a] hover:text-[#e4e4e7] border-b-2 border-transparent"
+                      : "text-[#a1a1aa] hover:text-[#e4e4e7] border-b-2 border-transparent"
                   }`}
                 >
                   {t === "grader" ? "Grader" : "Test Cases"}
                   {t === "testcases" && (
                     <span className="min-w-[18px] h-[18px] px-[5px] rounded-full text-[10px] font-semibold bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] inline-flex items-center justify-center">
-                      {problem?.testCases?.length || 0}
+                      {(problem?.testCases?.length || 0) + customTests.length}
                     </span>
                   )}
                 </button>
@@ -384,36 +476,102 @@ export default function ProblemDetailPage() {
 
               {tab === "testcases" && (
                 <div className="space-y-1">
-                  {!problem?.testCases?.length ? (
-                    <div className="flex flex-col items-center justify-center h-full gap-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] text-[#71717a]">
+                      {(problem?.testCases?.length || 0)} sync · {customTests.length} manual
+                    </span>
+                    <Button variant="ghost" onClick={addCustomTest}>
+                      <Plus className="w-3 h-3" /> Tambah Test Case
+                    </Button>
+                  </div>
+
+                  {!problem?.testCases?.length && customTests.length === 0 && (
+                    <div className="flex flex-col items-center justify-center gap-2 py-6">
                       <p className="text-[12px] text-[#52525b]">No test cases synced yet</p>
-                      <p className="text-[11px] text-[#52525b]">Visit the problem on Codeforces to auto-sync</p>
+                      {problem?.provider === "codeforces" ? (
+                        <p className="text-[11px] text-[#52525b]">Buka problem di Codeforces lalu klik Sync via extension</p>
+                      ) : problem?.provider === "tlx" ? (
+                        <p className="text-[11px] text-[#52525b]">TLX tidak mengekspos sample lewat API — tambah test case manual atau submit di TLX</p>
+                      ) : (
+                        <p className="text-[11px] text-[#52525b]">Sync problem via extension atau tambah test case manual</p>
+                      )}
                     </div>
-                  ) : (
-                    problem.testCases.map((tc, i) => (
-                      <details key={tc.id || i} className="group">
-                        <summary className="text-[12px] text-[#71717a] cursor-pointer hover:text-[#e4e4e7] py-[6px] px-[6px] rounded-[4px] hover:bg-[#1f1f23] transition-colors select-none">
-                          Test #{i + 1} {tc.isSample && <span className="text-[10px] text-[#8b5cf6] ml-1">(sample)</span>}
-                        </summary>
-                        <div className="grid grid-cols-2 gap-2 mt-1 mb-2 px-[6px]">
-                          <div>
-                            <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Input</div>
-                            <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[150px] overflow-y-auto">{tc.input}</pre>
-                          </div>
-                          <div>
-                            <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Expected</div>
-                            <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[150px] overflow-y-auto">{tc.output}</pre>
-                          </div>
-                        </div>
-                      </details>
-                    ))
                   )}
+
+                  {problem?.testCases?.map((tc, i) => (
+                    <details key={tc.id || i} className="group">
+                      <summary className="text-[12px] text-[#71717a] cursor-pointer hover:text-[#e4e4e7] py-[6px] px-[6px] rounded-[4px] hover:bg-[#1f1f23] transition-colors select-none">
+                        Test #{i + 1} {tc.isSample && <span className="text-[10px] text-[#8b5cf6] ml-1">(sample)</span>}
+                      </summary>
+                      <div className="grid grid-cols-2 gap-2 mt-1 mb-2 px-[6px]">
+                        <div>
+                          <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Input</div>
+                          <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[150px] overflow-y-auto">{tc.input}</pre>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Expected</div>
+                          <pre className="text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] whitespace-pre-wrap max-h-[150px] overflow-y-auto">{tc.output}</pre>
+                        </div>
+                      </div>
+                    </details>
+                  ))}
+
+                  {customTests.map((tc, i) => (
+                    <div key={`custom-${i}`} className="border border-[rgba(255,255,255,0.08)] rounded-[6px] p-[8px] mb-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] text-[#8b5cf6] font-medium">Manual #{i + 1}</span>
+                        <button
+                          onClick={() => removeCustomTest(i)}
+                          title="Hapus test case"
+                          className="p-[3px] rounded text-[#52525b] hover:text-[#ef4444] transition-colors"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Input</div>
+                          <textarea
+                            value={tc.input}
+                            onChange={(e) => updateCustomTest(i, "input", e.target.value)}
+                            rows={4}
+                            placeholder="stdin..."
+                            className="w-full text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] border border-[rgba(255,255,255,0.08)] focus:outline-none focus:border-[#8b5cf6] resize-y"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-[#52525b] mb-1 uppercase tracking-wide font-medium">Expected (opsional)</div>
+                          <textarea
+                            value={tc.output}
+                            onChange={(e) => updateCustomTest(i, "output", e.target.value)}
+                            rows={4}
+                            placeholder="expected output..."
+                            className="w-full text-[12px] font-mono bg-[#0f0f10] p-[8px] rounded-[4px] text-[#e4e4e7] border border-[rgba(255,255,255,0.08)] focus:outline-none focus:border-[#8b5cf6] resize-y"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {problem && (
+        <SubmitPopup
+          open={popupOpen}
+          onClose={() => setPopupOpen(false)}
+          problemTitle={problem.title || ""}
+          provider={problem.provider || "tlx"}
+          language={language}
+          verdict={submitResult?.verdict || ""}
+          score={submitResult?.score || 0}
+          pending={submitting || (submitResult?.pending ?? false)}
+          url={submitResult?.url}
+        />
+      )}
     </>
   );
 }
