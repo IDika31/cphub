@@ -3,20 +3,25 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/IDika31/cphub/api/internal/config"
 	"github.com/IDika31/cphub/api/internal/grader"
+	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type GraderHandler struct {
 	cfg   config.GraderConfig
 	queue *grader.Queue
+	db    *gorm.DB
 }
 
-func NewGraderHandler(cfg config.GraderConfig, queue *grader.Queue) *GraderHandler {
-	return &GraderHandler{cfg: cfg, queue: queue}
+func NewGraderHandler(cfg config.GraderConfig, queue *grader.Queue, db *gorm.DB) *GraderHandler {
+	return &GraderHandler{cfg: cfg, queue: queue, db: db}
 }
 
 type RunRequest struct {
@@ -25,6 +30,7 @@ type RunRequest struct {
 	TestCases      []grader.TestCase `json:"testCases"`
 	TimeoutSeconds int               `json:"timeoutSeconds"`
 	MemoryLimitMB  int               `json:"memoryLimitMB"`
+	ProblemID      string            `json:"problemId"`
 }
 
 func (h *GraderHandler) Run(c *fiber.Ctx) error {
@@ -83,6 +89,11 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 
 	// Run each test case
 	results := make([]grader.TestResult, 0, len(req.TestCases))
+	// Resolve per-request time/memory limits; fall back to server defaults.
+	memLimitMB := h.cfg.MemoryLimitMB
+	if req.MemoryLimitMB > 0 {
+		memLimitMB = req.MemoryLimitMB
+	}
 	for i, tc := range req.TestCases {
 		timeout := h.cfg.TimeoutSeconds
 		if req.TimeoutSeconds > 0 {
@@ -92,7 +103,7 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 			time.Duration(timeout)*time.Second)
 		defer cancel()
 
-		execResult, err := grader.RunFirejail(ctx, lang, td, tc.Input, h.cfg.FirejailProfile)
+		execResult, err := grader.RunFirejail(ctx, lang, td, tc.Input, h.cfg.FirejailProfile, memLimitMB)
 		if err != nil {
 			results = append(results, grader.TestResult{
 				Index:   i,
@@ -138,13 +149,70 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 		}
 	}
 
+	aggregate := grader.AggregateVerdict(results)
+
+	// Persist the run as a local submission and update problem solved status.
+	// Works for any provider (codeforces, tlx) since it keys off the problem row.
+	h.persistRun(c, &req, aggregate, results, passedTests, maxRuntime)
+
 	return c.JSON(grader.GraderResult{
-		Verdict:     grader.AggregateVerdict(results),
+		Verdict:     aggregate,
 		TotalTests:  len(req.TestCases),
 		PassedTests: passedTests,
 		MaxRuntime:  maxRuntime,
 		Results:     results,
 	})
+}
+
+// persistRun records the grader run as a LocalSubmission and, on full AC,
+// marks the problem solved. Best-effort: failures are logged, never block the response.
+func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader.Verdict, results []grader.TestResult, passed int, maxRuntime int64) {
+	if h.db == nil || req.ProblemID == "" {
+		return
+	}
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok || userIDStr == "" {
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return
+	}
+
+	// Resolve the problem: ProblemID may be a UUID (web) or a provider problemId string.
+	var problem model.Problem
+	if pid, perr := uuid.Parse(req.ProblemID); perr == nil {
+		err = h.db.First(&problem, "id = ?", pid).Error
+	} else {
+		err = h.db.First(&problem, "problem_id = ?", req.ProblemID).Error
+	}
+	if err != nil {
+		return
+	}
+
+	sub := model.LocalSubmission{
+		ID:          uuid.New(),
+		UserID:      userID,
+		ProblemID:   problem.ID,
+		Language:    req.Language,
+		SourceCode:  req.SourceCode,
+		Verdict:     string(verdict),
+		Runtime:     int(maxRuntime),
+		PassedTests: passed,
+		TotalTests:  len(req.TestCases),
+		ExecutedAt:  time.Now(),
+	}
+	if err := h.db.Create(&sub).Error; err != nil {
+		log.Printf("[grader] failed to record submission: %v", err)
+	}
+
+	// Full AC → mark solved (don't downgrade an already-solved problem).
+	if verdict == grader.VerdictAC && problem.Status != "solved" {
+		if err := h.db.Model(&model.Problem{}).Where("id = ?", problem.ID).
+			Update("status", "solved").Error; err != nil {
+			log.Printf("[grader] failed to mark problem solved: %v", err)
+		}
+	}
 }
 
 func (h *GraderHandler) Status(c *fiber.Ctx) error {
