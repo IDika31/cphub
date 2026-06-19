@@ -38,13 +38,14 @@ export default function ExtensionPage() {
               <li>Extension siap digunakan — buka halaman CF/TLX</li>
             </ol>
             <div className="flex gap-2 mt-4">
-              <Button variant="primary">
+              <Button variant="primary" disabled title="Belum tersedia — build manual via apps/extension/dist">
                 <Download className="w-3.5 h-3.5" /> Download Extension
               </Button>
-              <Button variant="default">
+              <Button variant="default" disabled title="Belum dipublikasikan">
                 <ExternalLink className="w-3.5 h-3.5" /> Chrome Web Store
               </Button>
             </div>
+            <p className="text-[11px] text-[#71717a] mt-2">Saat ini load unpacked dari <code className="text-[#8b5cf6]">apps/extension/dist</code> (lihat langkah di atas).</p>
           </div>
 
           {/* Keyboard Shortcuts */}

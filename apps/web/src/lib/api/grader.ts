@@ -6,6 +6,7 @@ export interface RunRequest {
   testCases: Array<{ input: string; output: string }>;
   timeoutSeconds?: number;
   memoryLimitMB?: number;
+  problemId?: string;
 }
 
 export interface TestResult {

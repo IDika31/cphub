@@ -23,7 +23,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         disabled={disabled}
-        className={`inline-flex items-center gap-[5px] px-[12px] py-[5px] rounded-[6px] text-[12px] font-medium transition-colors ${styles[variant]} ${disabled ? "opacity-45 pointer-events-none" : ""} ${className}`}
+        className={`inline-flex items-center justify-center gap-[5px] px-[12px] py-[5px] rounded-[6px] text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${styles[variant]} ${disabled ? "opacity-45 cursor-not-allowed pointer-events-none" : "cursor-pointer"} ${className}`}
         {...props}
       >
         {children}

@@ -59,17 +59,17 @@ export default function StatusPage() {
         {
           name: "Extension",
           status: "ok",
-          detail: "Browser extension ready · v4.0.0",
+          detail: "Browser extension · CF auto-sync + TLX web-mediated import",
         },
         {
           name: "Codeforces",
           status: "ok",
-          detail: "Codeforces API · OAuth ready",
+          detail: "OAuth + extension sync ready",
         },
         {
           name: "TLX TOKI",
           status: "ok",
-          detail: "TLX scraper ready · via extension",
+          detail: "Import via stored token (login di Connections)",
         },
       ]);
     } catch {
@@ -99,7 +99,7 @@ export default function StatusPage() {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {loading
               ? Array.from({ length: 6 }).map((_, i) => (
                   <Skeleton key={i} className="h-[64px]" />
@@ -115,7 +115,7 @@ export default function StatusPage() {
                         {c.name}
                       </span>
                     </div>
-                    <p className="text-[11px] text-[#52525b]">{c.detail}</p>
+                    <p className="text-[11px] text-[#71717a]">{c.detail}</p>
                   </div>
                 ))}
           </div>
