@@ -97,3 +97,17 @@ func (h *ProblemHandler) GetByProviderAndID(c *fiber.Ctx) error {
 
 	return c.JSON(problem)
 }
+
+func (h *ProblemHandler) GetByProblemID(c *fiber.Ctx) error {
+	problemID := c.Params("problemId")
+	if problemID == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "problemId required"})
+	}
+
+	problem, err := h.repo.FindByProblemID(problemID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Problem not found"})
+	}
+
+	return c.JSON(problem)
+}
