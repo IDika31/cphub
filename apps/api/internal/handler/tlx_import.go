@@ -89,6 +89,7 @@ func (h *TLXImportHandler) ImportTLX(c *fiber.Ctx) error {
 
 	log.Printf("[tlx-import] imported: %s — %q (user=%s)", problemID, ws.Title, userID)
 	return c.JSON(fiber.Map{
+		"id":        problem.ID.String(),
 		"problemId": problemID,
 		"title":     ws.Title,
 		"provider":  "tlx",
