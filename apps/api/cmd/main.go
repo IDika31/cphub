@@ -60,7 +60,7 @@ func main() {
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
-	graderHandler := handler.NewGraderHandler(cfg.Grader, grader.GetQueue())
+	graderHandler := handler.NewGraderHandler(cfg.Grader, grader.GetQueue(), db)
 	syncHandler := handler.NewSyncHandler(problemRepo, submissionRepo)
 	problemHandler := handler.NewProblemHandler(problemRepo)
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
@@ -69,6 +69,7 @@ func main() {
 	settingsHandler := handler.NewSettingsHandler(db)
 	snippetHandler := handler.NewSnippetHandler(db)
 	tlxImportHandler := handler.NewTLXImportHandler(db, problemRepo)
+	tlxSubmitHandler := handler.NewTLXSubmitHandler(db, problemRepo, submissionRepo)
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
@@ -81,7 +82,7 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, tlxImportHandler, cfg)
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, tlxImportHandler, tlxSubmitHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -103,6 +104,7 @@ func registerRoutes(
 	settingsHandler *handler.SettingsHandler,
 	snippetHandler *handler.SnippetHandler,
 	tlxImportHandler *handler.TLXImportHandler,
+	tlxSubmitHandler *handler.TLXSubmitHandler,
 	cfg *config.Config,
 ) {
 	// Health
@@ -137,9 +139,11 @@ func registerRoutes(
 	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
 	problems.Get("/", problemHandler.List)
 	problems.Get("/search", problemHandler.Search)
-	problems.Get("/:id", problemHandler.GetByID)
 	problems.Get("/by-provider/:provider/:problemId", problemHandler.GetByProviderAndID)
+	problems.Get("/by-problem-id/:problemId", problemHandler.GetByProblemID)
+	problems.Get("/:id", problemHandler.GetByID)
 	problems.Post("/import-tlx", tlxImportHandler.ImportTLX)
+	problems.Post("/submit-tlx", tlxSubmitHandler.SubmitTLX)
 
 	// Grader
 	graderGroup := app.Group("/api/grader", middleware.AuthRequired(cfg.JWT))
@@ -168,6 +172,7 @@ func registerRoutes(
 	// Dashboard
 	dashboard := app.Group("/api/dashboard", middleware.AuthRequired(cfg.JWT))
 		dashboard.Post("/sync-cf", dashboardHandler.SyncCF)
+		dashboard.Post("/sync-tlx", dashboardHandler.SyncTLX)
 		dashboard.Get("/overview", dashboardHandler.Overview)
 		dashboard.Get("/rating", dashboardHandler.RatingHistory)
 		dashboard.Get("/heatmap", dashboardHandler.Heatmap)
