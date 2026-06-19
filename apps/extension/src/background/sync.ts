@@ -1,4 +1,4 @@
-import { syncToAPI, type SyncPayload } from "../shared/api";
+import { syncToAPI, HttpError, type SyncPayload } from "../shared/api";
 import { pushToOfflineQueue, incrementSyncedCount, getOfflineQueue, clearOfflineQueue } from "../shared/storage";
 import { updateBadge } from "./badge";
 import { logger } from "../shared/logger";
@@ -35,7 +35,12 @@ export async function flushOfflineQueue(): Promise<number> {
 			flushed++;
 			// Rate limit: small delay between flushes
 			await new Promise((r) => setTimeout(r, 200));
-		} catch {
+		} catch (err) {
+			// Discard 4xx items — bad data, will never succeed
+			if (err instanceof HttpError && err.status >= 400 && err.status < 500) {
+				logger.warn(`Discarding bad queue item (HTTP ${err.status}): ${err.message}`);
+				continue;
+			}
 			remaining.push(item);
 		}
 	}
