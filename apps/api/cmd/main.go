@@ -68,6 +68,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(db, cfg.CF.ClientID, cfg.CF.ClientSecret, cfg.CF.RedirectURL)
 	settingsHandler := handler.NewSettingsHandler(db)
 	snippetHandler := handler.NewSnippetHandler(db)
+	tlxImportHandler := handler.NewTLXImportHandler(db, problemRepo)
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
@@ -80,7 +81,7 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, cfg)
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, tlxImportHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -101,6 +102,7 @@ func registerRoutes(
 	accountHandler *handler.AccountHandler,
 	settingsHandler *handler.SettingsHandler,
 	snippetHandler *handler.SnippetHandler,
+	tlxImportHandler *handler.TLXImportHandler,
 	cfg *config.Config,
 ) {
 	// Health
@@ -122,7 +124,7 @@ func registerRoutes(
 	auth.Get("/hmac-secret", middleware.AuthRequired(cfg.JWT), func(c *fiber.Ctx) error {
     return c.JSON(fiber.Map{"secret": cfg.Extension.HMACSecret})
 })
-auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
+	auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	auth.Post("/logout", middleware.AuthRequired(cfg.JWT), authHandler.Logout)
 
 	// Sync (HMAC protected)
@@ -131,12 +133,13 @@ auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	sync.Post("/problem", syncHandler.SyncProblem)
 	sync.Post("/submission", syncHandler.SyncSubmission)
 
-	// Problems (public read, optional auth)
+	// Problems (JWT protected)
 	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
 	problems.Get("/", problemHandler.List)
 	problems.Get("/search", problemHandler.Search)
 	problems.Get("/:id", problemHandler.GetByID)
 	problems.Get("/by-provider/:provider/:problemId", problemHandler.GetByProviderAndID)
+	problems.Post("/import-tlx", tlxImportHandler.ImportTLX)
 
 	// Grader
 	graderGroup := app.Group("/api/grader", middleware.AuthRequired(cfg.JWT))
