@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"time"
 
 	"github.com/IDika31/cphub/api/internal/config"
 	"github.com/IDika31/cphub/api/internal/database"
@@ -38,7 +39,7 @@ func HMACVerify(cfg config.ExtensionConfig) fiber.Handler {
 		}
 
 		// Store nonce (5 min TTL)
-		database.Cache.Set(ctx, key, "1", 0).Err()
+		database.Cache.Set(ctx, key, "1", 5*time.Minute).Err()
 
 		return c.Next()
 	}
