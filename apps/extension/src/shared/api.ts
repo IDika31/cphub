@@ -20,6 +20,13 @@ async function getApiUrl(): Promise<string> {
   return url || DEFAULT_API_URL;
 }
 
+export class HttpError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
+
 export async function syncToAPI(payload: SyncPayload): Promise<SyncResponse> {
   const apiUrl = await getApiUrl();
   const hmacSecret = await getSetting("hmacSecret");
@@ -51,14 +58,17 @@ export async function syncToAPI(payload: SyncPayload): Promise<SyncResponse> {
 
       if (!res.ok) {
         const errorBody = await res.json().catch(() => ({}));
-        throw new Error(
-          (errorBody as { error?: string }).error || `HTTP ${res.status}`,
-        );
+        const message = (errorBody as { error?: string }).error || `HTTP ${res.status}`;
+        throw new HttpError(message, res.status);
       }
 
       return (await res.json()) as SyncResponse;
     } catch (err) {
       lastError = err as Error;
+      // Don't retry client errors (4xx) — bad data won't succeed on retry
+      if (err instanceof HttpError && err.status >= 400 && err.status < 500) {
+        break;
+      }
       retries--;
       if (retries > 0) {
         await new Promise((r) => setTimeout(r, 1000 * (3 - retries)));

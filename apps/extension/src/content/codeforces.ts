@@ -39,10 +39,12 @@ function scrapeProblem(): Record<string, unknown> | null {
     const tagEls = document.querySelectorAll(".tag-box");
     const tags = Array.from(tagEls).map((el) => el.textContent?.trim() || "").filter(Boolean);
 
-    // Difficulty from problem index page or contest page
-    // Try to get from the problem rating span
-    const ratingEl = document.querySelector("span.difficulty-color, span.problem-rating");
-    const difficultyText = ratingEl?.textContent?.trim() || "";
+    // Difficulty is shown as a *1500-style tag-box in the sidebar
+    const allTagBoxes = document.querySelectorAll(".tag-box");
+    const ratingTagBox = Array.from(allTagBoxes).find((el) =>
+      el.textContent?.trim().startsWith("*"),
+    );
+    const difficultyText = ratingTagBox?.textContent?.trim() || "";
     const difficulty = parseInt(difficultyText.replace(/\D/g, "")) || 0;
 
     // Extract LaTeX from MathJax spans

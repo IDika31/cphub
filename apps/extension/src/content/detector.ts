@@ -25,7 +25,7 @@ export function detectPageType(): {
 
   // TLX
   if (url.includes("tlx.toki.id")) {
-    const isProblem = url.includes("/problems/");
+    const isProblem = /\/problems\/[^/]+\/[^/]+/.test(url);
     const isSubmission = url.includes("/submissions/");
     const isProfile = url.includes("/profiles/");
     return {

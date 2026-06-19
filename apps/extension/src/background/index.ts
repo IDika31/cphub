@@ -19,8 +19,29 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+const WEB_BASE = "http://localhost:3000";
+
+function openTLXImport(tlxUrl: string) {
+  chrome.tabs.create({
+    url: `${WEB_BASE}/problems/import?url=${encodeURIComponent(tlxUrl)}`,
+  });
+}
+
 chrome.runtime.onMessage.addListener(
   (message: Message<SyncPayload>, _sender, sendResponse) => {
+    // TLX import is web-mediated: open the CPHub import route which calls
+    // import-tlx server-side using the user's stored token.
+    if (message.type === MESSAGE_TYPES.OPEN_TLX_IMPORT) {
+      const url = (message.payload as { url?: string } | undefined)?.url;
+      if (url) {
+        openTLXImport(url);
+        sendResponse({ success: true });
+      } else {
+        sendResponse({ success: false, error: "Missing TLX url" });
+      }
+      return true;
+    }
+
     handleMessage(message)
       .then((result) => sendResponse(result))
       .catch((err) =>
@@ -52,21 +73,24 @@ chrome.commands.onCommand.addListener(async (command) => {
       const isCF = url.includes("codeforces.com");
       const isTLX = url.includes("tlx.toki.id");
 
-      if (isCF || isTLX) {
+      if (isTLX) {
+        // Web-mediated import: open CPHub import route with the TLX problem URL.
+        openTLXImport(url);
+        return;
+      }
+
+      if (isCF) {
         // Trigger sync first
         chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
         // Extract CF problem ID from URL for direct editor link
-        const cfMatch = url.match(/codeforces\.com\/(?:contest|problemset)\/(?:problem\/)?(\d+)\/(\w+)/);
+        const cfMatch = url.match(/codeforces\.com\/contest\/(\d+)\/problem\/([A-Z]\d*)/) || url.match(/codeforces\.com\/problemset\/problem\/(\d+)\/([A-Z]\d*)/);
         const cfId = cfMatch ? `${cfMatch[1]}${cfMatch[2]}` : "";
-        // Open CPHub — use provider filter so problem appears at top
-        const provider = isCF ? "codeforces" : "tlx";
-        // Open editor directly with natural problem ID (e.g., "2234G")
         const editorUrl = cfId
-          ? `http://localhost:3000/problems/${cfId}`
-          : `http://localhost:3000/problems?provider=${provider}`;
+          ? `${WEB_BASE}/problems/${cfId}`
+          : `${WEB_BASE}/problems?provider=codeforces`;
         chrome.tabs.create({ url: editorUrl });
       } else {
-        chrome.tabs.create({ url: "http://localhost:3000/dashboard" });
+        chrome.tabs.create({ url: `${WEB_BASE}/dashboard` });
       }
     });
   }
