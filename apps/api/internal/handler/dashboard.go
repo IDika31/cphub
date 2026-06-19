@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/IDika31/cphub/api/internal/database"
+	"github.com/IDika31/cphub/api/internal/provider/tlx"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -64,13 +66,27 @@ func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
 			Distinct("problem_id").Count(&attempted)
 	}
 
+	// Per-provider problem breakdown (local DB, all providers incl. TLX)
+	type providerStat struct {
+		Provider string `json:"provider"`
+		Problems int64  `json:"problems"`
+		Solved   int64  `json:"solved"`
+	}
+	byProvider := make([]providerStat, 0)
+	h.db.Table("problems").
+		Select("provider, COUNT(*) AS problems, COUNT(*) FILTER (WHERE status = 'solved') AS solved").
+		Group("provider").
+		Order("problems DESC").
+		Scan(&byProvider)
+
 	return c.JSON(fiber.Map{
-		"solved":    solved,
-		"attempted": attempted,
-		"streak":    streak,
-		"accuracy":  accuracy,
-		"cfHandle":  cfHandle,
-		"cfRating":  cfRating,
+		"solved":     solved,
+		"attempted":  attempted,
+		"streak":     streak,
+		"accuracy":   accuracy,
+		"cfHandle":   cfHandle,
+		"cfRating":   cfRating,
+		"byProvider": byProvider,
 	})
 }
 
@@ -154,8 +170,9 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 		}
 
 		// Store submissions
+		submittedAt := time.Unix(sub.CreationTimeSeconds, 0)
 		submission := struct {
-			ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid()"`
+			ID           uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid()"`
 			UserID       uuid.UUID
 			Provider     string
 			SubmissionID string
@@ -163,6 +180,9 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 			ProblemRef   string
 			Language     string
 			Verdict      string
+			Runtime      int
+			Memory       int
+			SubmittedAt  *time.Time
 		}{
 			UserID:       userID,
 			Provider:     "codeforces",
@@ -171,6 +191,9 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 			ProblemRef:   problemKey,
 			Language:     sub.ProgrammingLanguage,
 			Verdict:      sub.Verdict,
+			Runtime:      sub.TimeConsumedMillis,
+			Memory:       int(sub.MemoryConsumedBytes / 1024),
+			SubmittedAt:  &submittedAt,
 		}
 		h.db.Table("external_submissions").Where("provider = ? AND submission_id = ?", "codeforces", fmt.Sprintf("%d", sub.ID)).
 			FirstOrCreate(&submission)
@@ -179,6 +202,81 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 
 	log.Printf("[sync] synced %d problems + %d submissions for user %s", problemCount, subCount, userIDStr)
 	return c.JSON(fiber.Map{"status": "ok", "problems": problemCount, "submissions": subCount})
+}
+
+func (h *DashboardHandler) SyncTLX(c *fiber.Ctx) error {
+	userIDStr := c.Locals("userId").(string)
+	userID, _ := uuid.Parse(userIDStr)
+
+	var handle, token string
+	h.db.Table("linked_accounts").
+		Where("user_id = ? AND provider = ? AND is_connected = ?", userID, "tlx", true).
+		Select("handle, access_token").Row().Scan(&handle, &token)
+	if handle == "" || token == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "TLX not connected"})
+	}
+
+	client := tlx.NewClient()
+	result, err := client.GetAllSubmissions(handle, token, 10)
+	if err != nil {
+		log.Printf("[sync-tlx] fetch error for %s: %v", handle, err)
+		return c.Status(500).JSON(fiber.Map{"error": "TLX API error"})
+	}
+
+	subCount := 0
+	for _, sub := range result.Data.Page {
+		verdictCode := ""
+		score := 0
+		if sub.LatestGrading != nil {
+			verdictCode = sub.LatestGrading.Verdict.Code
+			score = sub.LatestGrading.Score
+		}
+
+		problemName := result.ProblemNamesMap[sub.ProblemJID]
+		alias := result.ProblemAliasesMap[sub.ContainerJID+"-"+sub.ProblemJID]
+		contestName := result.ContainerNamesMap[sub.ContainerJID]
+
+		title := problemName
+		if alias != "" {
+			title = alias + ". " + problemName
+		}
+
+		problemRef := sub.ProblemJID
+		if contestName != "" {
+			problemRef = contestName + " - " + title
+		}
+
+		submittedAt := time.UnixMilli(sub.Time)
+		_ = score
+
+		submission := struct {
+			ID           uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid()"`
+			UserID       uuid.UUID
+			Provider     string
+			SubmissionID string
+			ProblemTitle string
+			ProblemRef   string
+			Language     string
+			Verdict      string
+			SubmittedAt  *time.Time
+		}{
+			UserID:       userID,
+			Provider:     "tlx",
+			SubmissionID: fmt.Sprintf("%d", sub.ID),
+			ProblemTitle: title,
+			ProblemRef:   problemRef,
+			Language:     sub.GradingLanguage,
+			Verdict:      verdictCode,
+			SubmittedAt:  &submittedAt,
+		}
+		h.db.Table("external_submissions").
+			Where("provider = ? AND submission_id = ?", "tlx", fmt.Sprintf("%d", sub.ID)).
+			FirstOrCreate(&submission)
+		subCount++
+	}
+
+	log.Printf("[sync-tlx] synced %d submissions for user %s (%s)", subCount, userIDStr, handle)
+	return c.JSON(fiber.Map{"status": "ok", "submissions": subCount})
 }
 
 func (h *DashboardHandler) RatingHistory(c *fiber.Ctx) error {

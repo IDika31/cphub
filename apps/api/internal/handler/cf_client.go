@@ -8,13 +8,15 @@ import (
 
 // CFSubmissionFull is the complete Submission object from CF API
 type CFSubmissionFull struct {
-	ID                  int    `json:"id"`
-	ContestID           int    `json:"contestId"`
-	CreationTimeSeconds int64  `json:"creationTimeSeconds"`
-	RelativeTimeSeconds int64  `json:"relativeTimeSeconds"`
-	Problem             CFProblem `json:"problem"`
-	Verdict             string `json:"verdict"`
-	ProgrammingLanguage string `json:"programmingLanguage"`
+	ID                   int       `json:"id"`
+	ContestID            int       `json:"contestId"`
+	CreationTimeSeconds  int64     `json:"creationTimeSeconds"`
+	RelativeTimeSeconds  int64     `json:"relativeTimeSeconds"`
+	Problem              CFProblem `json:"problem"`
+	Verdict              string    `json:"verdict"`
+	ProgrammingLanguage  string    `json:"programmingLanguage"`
+	TimeConsumedMillis   int       `json:"timeConsumedMillis"`
+	MemoryConsumedBytes  int64     `json:"memoryConsumedBytes"`
 }
 
 type CFProblem struct {
