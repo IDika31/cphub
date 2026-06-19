@@ -38,12 +38,25 @@ function SidebarInner() {
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(["problems"]));
   const [providers, setProviders] = useState<LinkedAccount[]>([]);
   const [importTLXOpen, setImportTLXOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem("cphub_sidebar_collapsed") === "1");
+  }, []);
 
   useEffect(() => {
     fetchConnections()
       .then((res) => setProviders(res.data.filter((a) => a.isConnected)))
       .catch(() => {});
   }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("cphub_sidebar_collapsed", next ? "1" : "0");
+      return next;
+    });
+  }
 
   function toggleMenu(href: string) {
     setExpandedMenus((prev) => {
@@ -55,17 +68,25 @@ function SidebarInner() {
   }
 
   return (
-    <aside className="w-[220px] bg-[#18181b] border-r border-[rgba(255,255,255,0.08)] flex flex-col flex-shrink-0 overflow-hidden">
+    <aside className={`${collapsed ? "w-[56px]" : "w-[220px]"} bg-[#18181b] border-r border-[rgba(255,255,255,0.08)] flex flex-col flex-shrink-0 overflow-hidden transition-[width] duration-200`}>
       <div className="flex items-center justify-between px-[14px] h-[44px] border-b border-[rgba(255,255,255,0.08)]">
-        <Link href="/dashboard" className="text-[16px] font-semibold text-[#8b5cf6]">
-          CPHub
-        </Link>
-        <button className="text-[#52525b] hover:text-[#e4e4e7] p-1 rounded-[6px] hover:bg-[#1f1f23]">
-          <ChevronLeft className="w-4 h-4" />
+        {!collapsed && (
+          <Link href="/dashboard" className="text-[16px] font-semibold text-[#8b5cf6]">
+            CPHub
+          </Link>
+        )}
+        <button
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Perluas" : "Ciutkan"}
+          className={`text-[#52525b] hover:text-[#e4e4e7] p-1 rounded-[6px] hover:bg-[#1f1f23] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] ${collapsed ? "mx-auto" : ""}`}
+        >
+          <ChevronLeft className={`w-4 h-4 transition-transform ${collapsed ? "rotate-180" : ""}`} />
         </button>
       </div>
 
-      <nav className="flex-1 p-[6px] space-y-[1px] overflow-y-auto">
+      <nav className="flex-1 p-[6px] space-y-[1px] overflow-y-auto" aria-label="Navigasi utama">
         {NAV_ITEMS.map((item) => {
           const active = pathname.startsWith(item.href);
           const isExpanded = expandedMenus.has(item.href);
@@ -74,31 +95,33 @@ function SidebarInner() {
             <div key={item.href}>
               <Link
                 href={item.href}
+                title={collapsed ? item.label : undefined}
+                aria-current={active ? "page" : undefined}
                 onClick={(e) => {
-                  if (item.hasSubmenu) {
+                  if (item.hasSubmenu && !collapsed) {
                     e.preventDefault();
                     toggleMenu(item.href);
                   }
                 }}
-                className={`flex items-center gap-[9px] px-[10px] py-[7px] rounded-[6px] text-[13px] transition-colors ${
+                className={`flex items-center gap-[9px] px-[10px] py-[7px] rounded-[6px] text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] ${collapsed ? "justify-center" : ""} ${
                   active
                     ? "bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] font-medium"
-                    : "text-[#71717a] hover:bg-[#1f1f23] hover:text-[#e4e4e7]"
+                    : "text-[#a1a1aa] hover:bg-[#1f1f23] hover:text-[#e4e4e7]"
                 }`}
               >
-                <item.icon className="w-4 h-4" />
-                <span className="flex-1">{item.label}</span>
-                {item.hasSubmenu && (
+                <item.icon className="w-4 h-4 flex-shrink-0" />
+                {!collapsed && <span className="flex-1">{item.label}</span>}
+                {!collapsed && item.hasSubmenu && (
                   <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                 )}
               </Link>
 
-              {item.hasSubmenu && isExpanded && (
+              {!collapsed && item.hasSubmenu && isExpanded && (
                 <div className="ml-[37px] mt-[1px] space-y-[1px]">
                   <Link
                     href={item.href}
-                    className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                      pathname === item.href && !providerParam ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
+                    className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] ${
+                      pathname === item.href && !providerParam ? "text-[#8b5cf6]" : "text-[#a1a1aa] hover:text-[#e4e4e7]"
                     }`}
                   >
                     Semua
@@ -107,8 +130,8 @@ function SidebarInner() {
                     <div key={p.provider} className="flex items-center group">
                       <Link
                         href={`${item.href}?provider=${p.provider}`}
-                        className={`flex-1 block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                          pathname.startsWith(item.href) && providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
+                        className={`flex-1 block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] ${
+                          pathname.startsWith(item.href) && providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#a1a1aa] hover:text-[#e4e4e7]"
                         }`}
                       >
                         {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
@@ -116,8 +139,9 @@ function SidebarInner() {
                       {p.provider === "tlx" && item.href === "/problems" && (
                         <button
                           onClick={() => setImportTLXOpen(true)}
+                          aria-label="Import TLX Problem"
                           title="Import TLX Problem"
-                          className="opacity-0 group-hover:opacity-100 p-[3px] rounded text-[#52525b] hover:text-[#8b5cf6] transition-all"
+                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-[3px] rounded text-[#52525b] hover:text-[#8b5cf6] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
                         >
                           <Plus className="w-3 h-3" />
                         </button>
@@ -133,22 +157,26 @@ function SidebarInner() {
 
       <div className="border-t border-[rgba(255,255,255,0.08)] p-[6px]">
         {user && (
-          <div className="flex items-center gap-[9px] p-[6px_4px] rounded-[8px] cursor-pointer hover:bg-[#1f1f23] mb-[2px]">
-            <div className="w-8 h-8 rounded-full bg-[#8b5cf6] text-white text-[11px] font-semibold flex items-center justify-center">
+          <div className={`flex items-center gap-[9px] p-[6px_4px] rounded-[8px] cursor-pointer hover:bg-[#1f1f23] mb-[2px] ${collapsed ? "justify-center" : ""}`} title={collapsed ? (user.name || user.email) : undefined}>
+            <div className="w-8 h-8 rounded-full bg-[#8b5cf6] text-white text-[11px] font-semibold flex items-center justify-center flex-shrink-0">
               {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[12px] text-[#e4e4e7] truncate">{user.name || user.email}</div>
-              <div className="text-[11px] text-[#52525b] truncate">{user.email}</div>
-            </div>
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] text-[#e4e4e7] truncate">{user.name || user.email}</div>
+                <div className="text-[11px] text-[#71717a] truncate">{user.email}</div>
+              </div>
+            )}
           </div>
         )}
         <button
           onClick={logout}
-          className="flex items-center gap-[7px] w-full p-[6px_4px] text-[12px] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] rounded-[6px] transition-colors"
+          aria-label="Logout"
+          title={collapsed ? "Logout" : undefined}
+          className={`flex items-center gap-[7px] w-full p-[6px_4px] text-[12px] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] rounded-[6px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${collapsed ? "justify-center" : ""}`}
         >
-          <LogOut className="w-4 h-4" />
-          Logout
+          <LogOut className="w-4 h-4 flex-shrink-0" />
+          {!collapsed && "Logout"}
         </button>
       </div>
 

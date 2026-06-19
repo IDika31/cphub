@@ -72,8 +72,9 @@ function ProblemsetContent() {
             <button
               key={p.value}
               onClick={() => { setProvider(p.value); router.push(`/problems${p.value ? `?provider=${p.value}` : ""}`); }}
-              className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors ${
-                provider === p.value ? "bg-[#8b5cf6] text-white" : "bg-[#1f1f23] text-[#71717a] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
+              aria-pressed={provider === p.value}
+              className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
+                provider === p.value ? "bg-[#8b5cf6] text-white" : "bg-[#1f1f23] text-[#a1a1aa] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
               }`}
             >
               {p.label}
@@ -91,15 +92,15 @@ function ProblemsetContent() {
             action={<Button variant="primary" onClick={() => setImportModalOpen(true)}>Import TLX</Button>}
           />
         ) : (
-          <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] overflow-hidden">
-            <table className="w-full text-[13px]">
+          <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] overflow-x-auto">
+            <table className="w-full text-[13px] min-w-[640px]">
               <thead>
                 <tr className="border-b border-[rgba(255,255,255,0.08)] text-[#71717a] text-[12px]">
-                  <th className="text-left py-[10px] px-[14px] font-medium">Problem</th>
-                  <th className="text-left py-[10px] px-[14px] font-medium">Provider</th>
-                  <th className="text-left py-[10px] px-[14px] font-medium">Difficulty</th>
-                  <th className="text-left py-[10px] px-[14px] font-medium">Tags</th>
-                  <th className="text-left py-[10px] px-[14px] font-medium">Status</th>
+                  <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Problem</th>
+                  <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Provider</th>
+                  <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Difficulty</th>
+                  <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Tags</th>
+                  <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -108,7 +109,7 @@ function ProblemsetContent() {
                   return (
                     <tr key={p.id} className="border-b border-[rgba(255,255,255,0.04)] hover:bg-[#1f1f23] transition-colors cursor-pointer">
                       <td className="py-[10px] px-[14px]">
-                        <Link href={`/problems/${p.problemId}`} className="text-[#e4e4e7] hover:text-[#8b5cf6] transition-colors">
+                        <Link href={`/problems/${p.id}`} className="text-[#e4e4e7] hover:text-[#8b5cf6] transition-colors">
                           {p.title}
                         </Link>
                       </td>

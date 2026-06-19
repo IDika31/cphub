@@ -9,61 +9,75 @@ interface ProblemStatementProps {
   title?: string;
 }
 
+function extractPdfUrl(html: string): string | null {
+  const m = html.match(/<embed[^>]+src="([^"]+)"[^>]*type="application\/pdf"/i)
+    ?? html.match(/<embed[^>]+type="application\/pdf"[^>]+src="([^"]+)"/i);
+  return m ? m[1] : null;
+}
+
 export default function ProblemStatement({ html, title }: ProblemStatementProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const pdfUrl = extractPdfUrl(html);
 
   useEffect(() => {
-    if (!containerRef.current || !html) return;
+    if (pdfUrl || !containerRef.current || !html) return;
 
-    // Clone the HTML into a temporary element for processing
     const temp = document.createElement("div");
     temp.innerHTML = html;
 
-    // Strip empty MathJax_Preview spans (they show nothing useful)
     temp.querySelectorAll(".MathJax_Preview").forEach((el) => {
       if (!el.textContent?.trim()) el.remove();
     });
-
-    // Strip MJX_Assistive_MathML (accessibility only, not visible)
     temp.querySelectorAll(".MJX_Assistive_MathML").forEach((el) => el.remove());
 
-    // Process math/tex scripts — replace parent MathJax span with KaTeX
     const mathScripts = temp.querySelectorAll("script[type='math/tex'], script[type='math/tex; mode=display']");
     mathScripts.forEach((script) => {
       const tex = script.textContent || "";
       const isDisplay = script.getAttribute("type") === "math/tex; mode=display";
-      // Find the closest MathJax span container
       const parent = script.closest(".MathJax") as HTMLElement | null;
       try {
-        const rendered = katex.renderToString(tex, {
-          throwOnError: false,
-          displayMode: isDisplay,
-        });
+        const rendered = katex.renderToString(tex, { throwOnError: false, displayMode: isDisplay });
         if (parent) {
           parent.innerHTML = rendered;
         } else {
-          // Replace script itself
           const span = document.createElement("span");
           span.innerHTML = rendered;
           script.parentNode?.replaceChild(span, script);
         }
       } catch {
-        // If KaTeX fails, strip the broken MathJax spans, keep script text
         if (parent) parent.textContent = tex;
       }
     });
 
-    // Strip leftover empty MathJax spans
     temp.querySelectorAll(".MathJax").forEach((el) => {
       const span = el as HTMLElement;
-      if (!span.textContent?.trim() || span.innerHTML === "") {
-        span.remove();
-      }
+      if (!span.textContent?.trim() || span.innerHTML === "") span.remove();
     });
 
-    // Set cleaned HTML
     containerRef.current.innerHTML = temp.innerHTML;
-  }, [html]);
+  }, [html, pdfUrl]);
+
+  if (pdfUrl) {
+    return (
+      <div className="problem-statement-content text-[15px] leading-relaxed text-[#e4e4e7]">
+        {title && <h2 className="text-[16px] font-semibold mb-3">{title}</h2>}
+        <iframe
+          src={pdfUrl}
+          className="w-full rounded border border-[rgba(255,255,255,0.08)]"
+          style={{ height: "80vh" }}
+          title={title || "Problem Statement"}
+        />
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block mt-2 text-[12px] text-[#8b5cf6] hover:underline"
+        >
+          Buka PDF di tab baru ↗
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="problem-statement-content text-[15px] leading-relaxed text-[#e4e4e7]">

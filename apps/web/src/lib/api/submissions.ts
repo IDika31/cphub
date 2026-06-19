@@ -16,6 +16,9 @@ export interface ExternalSubmission {
 export interface LocalSubmission {
   id: string;
   problemId: string;
+  problemTitle: string;
+  provider: string;
+  problemRef: string;
   language: string;
   verdict: string;
   runtime: number;

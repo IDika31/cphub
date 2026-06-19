@@ -28,7 +28,7 @@ export default function ImportTLXModal({ open, onClose, onSuccess }: Props) {
       const res = await importTLXProblem(url);
       setUrl("");
       handleClose();
-      onSuccess?.(res.problemId);
+      onSuccess?.(res.id);
     } catch (err: unknown) {
       setError(
         (err as { message?: string })?.message || "Gagal mengimport problem TLX",
