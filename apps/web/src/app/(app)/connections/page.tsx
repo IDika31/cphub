@@ -6,8 +6,9 @@ import Button from "@/components/ui/button";
 import Badge from "@/components/ui/badge";
 import Skeleton from "@/components/ui/skeleton";
 import Modal from "@/components/ui/modal";
-import { fetchConnections, unlinkAccount, type LinkedAccount } from "@/lib/api/connections";
+import { fetchConnections, unlinkAccount, linkTLX, type LinkedAccount } from "@/lib/api/connections";
 import { apiClient, API_BASE_URL } from "@/lib/api/client";
+import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 
 interface ProviderRow {
   name: string;
@@ -21,6 +22,11 @@ export default function ConnectionsPage() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [tlxModalOpen, setTlxModalOpen] = useState(false);
+  const [tlxUsername, setTlxUsername] = useState("");
+  const [tlxPassword, setTlxPassword] = useState("");
+  const [tlxLoading, setTlxLoading] = useState(false);
+  const [tlxError, setTlxError] = useState("");
+  const [tlxImportOpen, setTlxImportOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -63,7 +69,7 @@ export default function ConnectionsPage() {
           provider: "tlx",
           connected: accounts.some((a) => a.provider === "tlx" && a.isConnected),
           account: accounts.find((a) => a.provider === "tlx") || null,
-          description: "Hubungkan akun TLX via browser extension untuk mulai sync problem.",
+          description: "Hubungkan akun TLX untuk import problem langsung via API.",
         },
         {
           name: "Google",
@@ -85,6 +91,24 @@ export default function ConnectionsPage() {
       await unlinkAccount(id);
       loadData();
     } catch {}
+  }
+
+  async function handleTLXSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setTlxLoading(true);
+    setTlxError("");
+    try {
+      await linkTLX(tlxUsername, tlxPassword);
+      setTlxModalOpen(false);
+      setTlxUsername("");
+      setTlxPassword("");
+      loadData();
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || "Gagal menghubungkan akun TLX";
+      setTlxError(msg);
+    } finally {
+      setTlxLoading(false);
+    }
   }
 
   return (
@@ -130,12 +154,19 @@ export default function ConnectionsPage() {
                   )}
                 </div>
                 {p.connected && p.account ? (
-                  <Button
-                    variant="danger"
-                    onClick={() => handleUnlink(p.account!.id)}
-                  >
-                    Unlink
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {p.provider === "tlx" && (
+                      <Button variant="ghost" onClick={() => setTlxImportOpen(true)}>
+                        Import Problem
+                      </Button>
+                    )}
+                    <Button
+                      variant="danger"
+                      onClick={() => handleUnlink(p.account!.id)}
+                    >
+                      Unlink
+                    </Button>
+                  </div>
                 ) : (
                   <Button variant="primary" onClick={() => handleLink(p.provider)}>
                     Link
@@ -146,22 +177,56 @@ export default function ConnectionsPage() {
           </div>
         )}
 
-        <Modal open={tlxModalOpen} onClose={() => setTlxModalOpen(false)} title="Hubungkan TLX TOKI">
-          <div className="text-[13px] text-[#71717a] space-y-3">
-            <p>
-              TLX TOKI tidak memiliki OAuth API publik. Hubungkan akun melalui browser extension:
+        <ImportTLXModal
+          open={tlxImportOpen}
+          onClose={() => setTlxImportOpen(false)}
+        />
+
+        <Modal open={tlxModalOpen} onClose={() => { setTlxModalOpen(false); setTlxError(""); }} title="Hubungkan TLX TOKI">
+          <form onSubmit={handleTLXSubmit} className="space-y-4">
+            <p className="text-[13px] text-[#71717a]">
+              Masukkan username dan password akun TLX kamu.
             </p>
-            <ol className="list-decimal pl-5 space-y-2">
-              <li>Install <strong className="text-[#e4e4e7]">CPHub Extension</strong> di Chrome</li>
-              <li>Buka halaman profil TLX di browser</li>
-              <li>Extension akan mendeteksi sesi aktifmu</li>
-              <li>Klik tombol Sync di popup extension</li>
-              <li>Akun TLX akan muncul sebagai Connected di sini</li>
-            </ol>
-            <p className="text-[12px] text-[#52525b]">
-              Buka halaman <a href="/extension" className="text-[#8b5cf6] hover:underline">Extension</a> untuk panduan instalasi.
-            </p>
-          </div>
+            <div className="space-y-2">
+              <label className="block text-[12px] text-[#a1a1aa]">Username</label>
+              <input
+                type="text"
+                value={tlxUsername}
+                onChange={(e) => setTlxUsername(e.target.value)}
+                placeholder="username TLX"
+                required
+                autoComplete="username"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#8b5cf6]"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-[12px] text-[#a1a1aa]">Password</label>
+              <input
+                type="password"
+                value={tlxPassword}
+                onChange={(e) => setTlxPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#8b5cf6]"
+              />
+            </div>
+            {tlxError && (
+              <p className="text-[12px] text-[#ef4444]">{tlxError}</p>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => { setTlxModalOpen(false); setTlxError(""); }}
+              >
+                Batal
+              </Button>
+              <Button type="submit" variant="primary" disabled={tlxLoading}>
+                {tlxLoading ? "Menghubungkan..." : "Hubungkan"}
+              </Button>
+            </div>
+          </form>
         </Modal>
       </div>
     </>
