@@ -42,7 +42,7 @@ func New(cfg ServerConfig) *Server {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     "http://localhost:3000",
 		AllowMethods:     "GET,POST,PUT,DELETE,PATCH,OPTIONS",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-HMAC-Signature,X-Nonce",
 		AllowCredentials: true,
 	}))
 
