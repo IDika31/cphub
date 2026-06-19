@@ -18,6 +18,7 @@ vendor/
 *.dylib
 *.test
 *.out
+apps/api/bin/
 
 # Environment
 .env
