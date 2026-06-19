@@ -2,13 +2,14 @@
 
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
-  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown,
+  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown, Plus,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
+import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 
 interface NavItem {
   href: string;
@@ -31,10 +32,12 @@ function SidebarInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const providerParam = searchParams.get("provider") || "";
+  const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(["problems"]));
   const [providers, setProviders] = useState<LinkedAccount[]>([]);
+  const [importTLXOpen, setImportTLXOpen] = useState(false);
 
   useEffect(() => {
     fetchConnections()
@@ -101,15 +104,25 @@ function SidebarInner() {
                     Semua
                   </Link>
                   {providers.map((p) => (
-                    <Link
-                      key={p.provider}
-                      href={`${item.href}?provider=${p.provider}`}
-                      className={`block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
-                        pathname.startsWith(item.href) && providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
-                      }`}
-                    >
-                      {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
-                    </Link>
+                    <div key={p.provider} className="flex items-center group">
+                      <Link
+                        href={`${item.href}?provider=${p.provider}`}
+                        className={`flex-1 block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors ${
+                          pathname.startsWith(item.href) && providerParam === p.provider ? "text-[#8b5cf6]" : "text-[#71717a] hover:text-[#e4e4e7]"
+                        }`}
+                      >
+                        {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
+                      </Link>
+                      {p.provider === "tlx" && item.href === "/problems" && (
+                        <button
+                          onClick={() => setImportTLXOpen(true)}
+                          title="Import TLX Problem"
+                          className="opacity-0 group-hover:opacity-100 p-[3px] rounded text-[#52525b] hover:text-[#8b5cf6] transition-all"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -138,6 +151,12 @@ function SidebarInner() {
           Logout
         </button>
       </div>
+
+      <ImportTLXModal
+        open={importTLXOpen}
+        onClose={() => setImportTLXOpen(false)}
+        onSuccess={(id) => router.push(`/problems/${id}`)}
+      />
     </aside>
   );
 }

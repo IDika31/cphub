@@ -11,6 +11,7 @@ import EmptyState from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { fetchProblems } from "@/lib/api/problems";
 import type { Problem } from "@/lib/api/types";
+import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 
 const PROVIDERS: Array<{ value: string; label: string }> = [
   { value: "", label: "All" },
@@ -27,6 +28,7 @@ function ProblemsetContent() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   useEffect(() => {
     setProvider(searchParams.get("provider") || "");
@@ -53,8 +55,16 @@ function ProblemsetContent() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          <Button variant="primary" onClick={() => setImportModalOpen(true)}>
+            Import TLX
+          </Button>
         </div>
       </Topbar>
+      <ImportTLXModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onSuccess={(id) => router.push(`/problems/${id}`)}
+      />
 
       <div className="flex-1 overflow-y-auto p-[14px]">
         <div className="flex gap-2 mb-3">
@@ -77,8 +87,8 @@ function ProblemsetContent() {
           <EmptyState
             icon={<Files className="w-8 h-8" />}
             title="No problems synced yet"
-            description="Sync problems from Codeforces or TLX using the browser extension."
-            action={<Button variant="primary">Install Extension</Button>}
+            description="Sync problems from Codeforces via extension, atau import TLX problem via tombol Import TLX."
+            action={<Button variant="primary" onClick={() => setImportModalOpen(true)}>Import TLX</Button>}
           />
         ) : (
           <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] overflow-hidden">
