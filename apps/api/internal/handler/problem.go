@@ -1,19 +1,25 @@
 package handler
 
 import (
+	"regexp"
 	"strconv"
+	"strings"
 
+	"github.com/IDika31/cphub/api/internal/provider/codeforces"
 	"github.com/IDika31/cphub/api/internal/repository"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
+var cfProblemIDRe = regexp.MustCompile(`^(\d+)([A-Za-z]\d*)$`)
+
 type ProblemHandler struct {
-	repo *repository.ProblemRepository
+	repo      *repository.ProblemRepository
+	cfScraper *codeforces.Scraper
 }
 
-func NewProblemHandler(repo *repository.ProblemRepository) *ProblemHandler {
-	return &ProblemHandler{repo: repo}
+func NewProblemHandler(repo *repository.ProblemRepository, cfScraper *codeforces.Scraper) *ProblemHandler {
+	return &ProblemHandler{repo: repo, cfScraper: cfScraper}
 }
 
 func (h *ProblemHandler) List(c *fiber.Ctx) error {
@@ -40,6 +46,9 @@ func (h *ProblemHandler) List(c *fiber.Ctx) error {
 	}
 	if status := c.Query("status"); status != "" {
 		filter["status"] = status
+	}
+	if q := c.Query("q"); q != "" {
+		filter["q"] = q
 	}
 
 	problems, total, err := h.repo.FindAll(filter, limit, offset)
@@ -105,9 +114,36 @@ func (h *ProblemHandler) GetByProblemID(c *fiber.Ctx) error {
 	}
 
 	problem, err := h.repo.FindByProblemID(problemID)
-	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Problem not found"})
+	if err == nil {
+		// Re-scrape CF problems missing test cases or statement (e.g. imported before scraper fix)
+		if problem.Provider == "codeforces" && (len(problem.TestCases) == 0 || problem.Statement == "") && h.cfScraper != nil {
+			if m := cfProblemIDRe.FindStringSubmatch(problemID); m != nil {
+				if p, fetchErr := h.cfScraper.FetchProblem(m[1], strings.ToUpper(m[2])); fetchErr == nil {
+					_ = h.repo.Upsert(p)
+					if fresh, e := h.repo.FindByProblemID(problemID); e == nil {
+						return c.JSON(fresh)
+					}
+				}
+			}
+		}
+		return c.JSON(problem)
 	}
 
-	return c.JSON(problem)
+	// Lazy-import: auto-scrape CF problem if not in DB
+	if h.cfScraper != nil {
+		if m := cfProblemIDRe.FindStringSubmatch(problemID); m != nil {
+			contestID := m[1]
+			letter := strings.ToUpper(m[2])
+			p, fetchErr := h.cfScraper.FetchProblem(contestID, letter)
+			if fetchErr == nil {
+				_ = h.repo.Upsert(p)
+				if fresh, e := h.repo.FindByProblemID(p.ProblemID); e == nil {
+					return c.JSON(fresh)
+				}
+				return c.JSON(p)
+			}
+		}
+	}
+
+	return c.Status(404).JSON(fiber.Map{"error": "Problem not found"})
 }
