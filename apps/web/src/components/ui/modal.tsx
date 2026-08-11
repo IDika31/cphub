@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useId, type ReactNode } from "react";
+import { useEffect, useRef, useId, useCallback, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -14,20 +14,22 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const stableOnClose = useCallback(() => onCloseRef.current(), []);
 
   useEffect(() => {
     if (!open) return;
 
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") stableOnClose();
     }
     document.addEventListener("keydown", handleEsc);
 
-    // Lock body scroll while open
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // Move focus into the dialog, restore it on close
     const prevActive = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
 
@@ -36,7 +38,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
       document.body.style.overflow = prevOverflow;
       prevActive?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, stableOnClose]);
 
   if (!open) return null;
 
