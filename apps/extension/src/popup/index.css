@@ -10,15 +10,26 @@
 
 body {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
-  width: 340px;
-  min-height: 420px;
+  width: 360px;
+  min-height: 480px;
   overflow: hidden;
+  background: #ffffff;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
 }
 
 ::-webkit-scrollbar {
   width: 4px;
 }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: #cbd5e1;
   border-radius: 2px;
+}
+
+*:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
 }
