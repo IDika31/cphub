@@ -15,6 +15,43 @@ function extractPdfUrl(html: string): string | null {
   return m ? m[1] : null;
 }
 
+function renderDollarMath(container: HTMLElement) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      if ((node.parentElement as Element | null)?.closest(".katex, code, pre, script")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return node.textContent?.includes("$") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+    },
+  });
+
+  const nodes: Text[] = [];
+  let n: Node | null;
+  while ((n = walker.nextNode())) nodes.push(n as Text);
+
+  for (const textNode of nodes) {
+    const text = textNode.textContent || "";
+    const rendered = text
+      .replace(/\$\$\$([^$]+?)\$\$\$/g, (_, tex) => {
+        try { return katex.renderToString(tex.trim(), { throwOnError: false, displayMode: false }); }
+        catch { return `$$$${tex}$$$`; }
+      })
+      .replace(/\$\$([^$]+?)\$\$/g, (_, tex) => {
+        try { return katex.renderToString(tex.trim(), { throwOnError: false, displayMode: true }); }
+        catch { return `$$${tex}$$`; }
+      })
+      .replace(/\$([^$\n]+?)\$/g, (_, tex) => {
+        try { return katex.renderToString(tex.trim(), { throwOnError: false, displayMode: false }); }
+        catch { return `$${tex}$`; }
+      });
+    if (rendered !== text) {
+      const span = document.createElement("span");
+      span.innerHTML = rendered;
+      textNode.parentNode?.replaceChild(span, textNode);
+    }
+  }
+}
+
 export default function ProblemStatement({ html, title }: ProblemStatementProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfUrl = extractPdfUrl(html);
@@ -25,34 +62,41 @@ export default function ProblemStatement({ html, title }: ProblemStatementProps)
     const temp = document.createElement("div");
     temp.innerHTML = html;
 
-    temp.querySelectorAll(".MathJax_Preview").forEach((el) => {
-      if (!el.textContent?.trim()) el.remove();
-    });
-    temp.querySelectorAll(".MJX_Assistive_MathML").forEach((el) => el.remove());
-
-    const mathScripts = temp.querySelectorAll("script[type='math/tex'], script[type='math/tex; mode=display']");
+    // Codeforces ships pre-rendered MathJax: a visual `.MathJax` span (garbled
+    // <nobr> glyphs), a `.MathJax_Preview`/assistive-MathML pair, and the source
+    // `<script type="math/tex">` as a SIBLING (not a child) of those nodes.
+    // Strategy: re-render each script with KaTeX in place, then drop every
+    // MathJax visual node so nothing duplicates.
+    const mathScripts = temp.querySelectorAll(
+      "script[type='math/tex'], script[type='math/tex; mode=display']"
+    );
     mathScripts.forEach((script) => {
       const tex = script.textContent || "";
-      const isDisplay = script.getAttribute("type") === "math/tex; mode=display";
-      const parent = script.closest(".MathJax") as HTMLElement | null;
+      const type = script.getAttribute("type") || "";
+      const isDisplay = type.includes("mode=display");
+      const span = document.createElement("span");
       try {
-        const rendered = katex.renderToString(tex, { throwOnError: false, displayMode: isDisplay });
-        if (parent) {
-          parent.innerHTML = rendered;
-        } else {
-          const span = document.createElement("span");
-          span.innerHTML = rendered;
-          script.parentNode?.replaceChild(span, script);
-        }
+        span.innerHTML = katex.renderToString(tex, {
+          throwOnError: false,
+          displayMode: isDisplay,
+        });
       } catch {
-        if (parent) parent.textContent = tex;
+        span.textContent = tex;
       }
+      script.parentNode?.replaceChild(span, script);
     });
 
-    temp.querySelectorAll(".MathJax").forEach((el) => {
-      const span = el as HTMLElement;
-      if (!span.textContent?.trim() || span.innerHTML === "") span.remove();
-    });
+    // Remove leftover MathJax DOM (visual spans, previews, assistive MathML,
+    // display wrappers). KaTeX output already inserted above.
+    temp
+      .querySelectorAll(
+        ".MathJax, .MathJax_Preview, .MathJax_Display, .MJX_Assistive_MathML, .MathJax_SVG, .MathJax_CHTML"
+      )
+      .forEach((el) => el.remove());
+
+    // Render any remaining raw $...$ / $$...$$ LaTeX in text nodes (e.g. TLX)
+    // Skip for Codeforces — it uses script[type='math/tex'], already handled above.
+    if (mathScripts.length === 0) renderDollarMath(temp);
 
     containerRef.current.innerHTML = temp.innerHTML;
   }, [html, pdfUrl]);
