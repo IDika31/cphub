@@ -8,6 +8,7 @@ import Skeleton from "@/components/ui/skeleton";
 import Modal from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { fetchConnections, unlinkAccount, linkTLX, linkTLXCustom, type LinkedAccount } from "@/lib/api/connections";
+import { loginCodeforces } from "@/lib/api/codeforces";
 import { apiClient, API_BASE_URL } from "@/lib/api/client";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 import { providerLabel, PROVIDER_TLX_CUSTOM } from "@/lib/providers";
@@ -29,6 +30,17 @@ export default function ConnectionsPage() {
   const [tlxLoading, setTlxLoading] = useState(false);
   const [tlxError, setTlxError] = useState("");
   const [tlxImportOpen, setTlxImportOpen] = useState(false);
+  // Codeforces logs in with handle+password like TLX does. It has no OAuth of its
+  // own, and only a real session can submit or register, so this is the primary
+  // path — the old OAuth button stays as a secondary option.
+  const [cfModalOpen, setCfModalOpen] = useState(false);
+  const [cfHandle, setCfHandle] = useState("");
+  const [cfPassword, setCfPassword] = useState("");
+  const [cfSavePassword, setCfSavePassword] = useState(true);
+  const [cfLoading, setCfLoading] = useState(false);
+  const [cfError, setCfError] = useState("");
+  const cfHandleId = useId();
+  const cfPassId = useId();
   const [customTLX, setCustomTLX] = useState<LinkedAccount[]>([]);
   // A self-hosted Judgels instance logs in exactly like tlx.toki.id — same
   // /session/login, same /users/me — so it gets the same form, keyed by host.
@@ -49,21 +61,45 @@ export default function ConnectionsPage() {
 
   async function handleLink(provider: string) {
     switch (provider) {
-      case "codeforces": {
-        try {
-          const res = await apiClient<{ redirectUrl: string }>("/api/accounts/codeforces", { method: "POST" });
-          window.location.href = res.redirectUrl;
-        } catch (err) {
-          addToast("error", `Gagal memulai OAuth Codeforces: ${(err as Error).message || "cek koneksi API"}`);
-        }
+      case "codeforces":
+        // Password login, not OAuth: only a browser session can submit code or
+        // register for a contest.
+        setCfModalOpen(true);
         break;
-      }
       case "tlx":
         setTlxModalOpen(true);
         break;
       case "google":
         window.location.href = `${API_BASE_URL}/api/auth/google`;
         break;
+    }
+  }
+
+  async function startCodeforcesOAuth() {
+    try {
+      const res = await apiClient<{ redirectUrl: string }>("/api/accounts/codeforces", { method: "POST" });
+      window.location.href = res.redirectUrl;
+    } catch (err) {
+      setCfError(`OAuth Codeforces gagal dimulai: ${(err as Error).message || "cek koneksi API"}`);
+    }
+  }
+
+  async function handleCodeforcesSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setCfLoading(true);
+    setCfError("");
+    try {
+      const res = await loginCodeforces(cfHandle, cfPassword, cfSavePassword);
+      addToast("success", `Codeforces terhubung sebagai ${res.handle}`);
+      if (res.warning) addToast("error", res.warning);
+      setCfModalOpen(false);
+      setCfHandle("");
+      setCfPassword("");
+      loadData();
+    } catch (err) {
+      setCfError((err as Error).message || "Login Codeforces gagal");
+    } finally {
+      setCfLoading(false);
     }
   }
 
@@ -319,6 +355,68 @@ export default function ConnectionsPage() {
               <Button type="submit" variant="primary" disabled={customLoading}>
                 {customLoading ? "Menghubungkan..." : "Hubungkan"}
               </Button>
+            </div>
+          </form>
+        </Modal>
+
+        <Modal open={cfModalOpen} onClose={() => { setCfModalOpen(false); setCfError(""); }} title="Hubungkan Codeforces">
+          <form onSubmit={handleCodeforcesSubmit} className="space-y-4">
+            <p className="text-[13px] text-[#a1a1aa]">
+              Codeforces tidak punya API untuk submit maupun daftar contest, jadi CPHub
+              menyimpan sesi login kamu dan memakai sesi itu. Password hanya dipakai untuk
+              login; kalau disimpan, disimpan terenkripsi di server.
+            </p>
+            <div className="space-y-2">
+              <label htmlFor={cfHandleId} className="block text-[12px] text-[#a1a1aa]">Handle atau email</label>
+              <input
+                id={cfHandleId}
+                type="text"
+                value={cfHandle}
+                onChange={(e) => setCfHandle(e.target.value)}
+                placeholder="handle Codeforces"
+                required
+                autoComplete="username"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor={cfPassId} className="block text-[12px] text-[#a1a1aa]">Password</label>
+              <input
+                id={cfPassId}
+                type="password"
+                value={cfPassword}
+                onChange={(e) => setCfPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
+              />
+            </div>
+            <label className="flex items-start gap-2 text-[12px] text-[#a1a1aa]">
+              <input
+                type="checkbox"
+                checked={cfSavePassword}
+                onChange={(e) => setCfSavePassword(e.target.checked)}
+                className="mt-0.5 accent-[#8b5cf6]"
+              />
+              <span>
+                Simpan password (terenkripsi) supaya sesi yang kedaluwarsa bisa diperbarui
+                sendiri. Tanpa ini kamu perlu login ulang di sini tiap kali sesi mati.
+              </span>
+            </label>
+            {cfError && <p role="alert" className="text-[12px] text-[#f87171]">{cfError}</p>}
+            <div className="flex flex-wrap justify-between gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={startCodeforcesOAuth}>
+                Pakai OAuth
+              </Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="ghost" onClick={() => { setCfModalOpen(false); setCfError(""); }}>
+                  Batal
+                </Button>
+                <Button type="submit" variant="primary" disabled={cfLoading}>
+                  {cfLoading ? "Menghubungkan..." : "Hubungkan"}
+                </Button>
+              </div>
             </div>
           </form>
         </Modal>

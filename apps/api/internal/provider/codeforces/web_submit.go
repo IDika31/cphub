@@ -1,0 +1,174 @@
+package codeforces
+
+import (
+	"fmt"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var (
+	// The submit form's language dropdown. Codeforces renumbers programTypeId
+	// whenever it updates a compiler, so the ids are read from the page instead of
+	// being carried as a table that silently rots.
+	langOptionRe  = regexp.MustCompile(`(?s)<option value="(\d+)"[^>]*>(.*?)</option>`)
+	langSelectRe  = regexp.MustCompile(`(?s)<select[^>]+name="programTypeId".*?</select>`)
+	hiddenInputRe = regexp.MustCompile(`<input[^>]+type="hidden"[^>]*>`)
+	attrRe        = regexp.MustCompile(`(\w+)="([^"]*)"`)
+	successMsgRe  = regexp.MustCompile(`(?s)Codeforces\.showMessage\("(.*?)"\)`)
+)
+
+type Language struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// LanguageOptions lists what the account may submit in. It doubles as a session
+// check: the dropdown only renders for a logged-in user.
+func (s *WebSession) LanguageOptions(contestID int) ([]Language, error) {
+	body, err := s.get(fmt.Sprintf("/contest/%d/submit", contestID))
+	if err != nil {
+		return nil, err
+	}
+	block := langSelectRe.FindString(body)
+	if block == "" {
+		return nil, fmt.Errorf("dropdown bahasa tidak ada di halaman submit — sesi Codeforces kemungkinan sudah kedaluwarsa")
+	}
+	var langs []Language
+	for _, m := range langOptionRe.FindAllStringSubmatch(block, -1) {
+		name := strings.TrimSpace(htmlText(m[2]))
+		if name == "" {
+			continue
+		}
+		langs = append(langs, Language{ID: m[1], Name: name})
+	}
+	if len(langs) == 0 {
+		return nil, fmt.Errorf("tidak ada opsi bahasa terbaca")
+	}
+	return langs, nil
+}
+
+// Submit sends a solution. Every problemset problem belongs to a contest, so the
+// contest form is the single path used for both — /problemset/submit wants a
+// different field name for no gain.
+//
+// programTypeID must come from LanguageOptions: guessing it is how a submission
+// ends up compiled as the wrong language.
+func (s *WebSession) Submit(contestID int, problemIndex, programTypeID, source string) error {
+	path := fmt.Sprintf("/contest/%d/submit", contestID)
+	body, err := s.get(path)
+	if err != nil {
+		return err
+	}
+	csrf := csrfRe.FindStringSubmatch(body)
+	if csrf == nil {
+		return fmt.Errorf("csrf token tidak ditemukan di halaman submit — sesi kedaluwarsa?")
+	}
+
+	form := url.Values{
+		"csrf_token":            {csrf[1]},
+		"ftaa":                  {s.ftaa},
+		"bfaa":                  {s.bfaa},
+		"action":                {"submitSolutionFormSubmitted"},
+		"submittedProblemIndex": {strings.ToUpper(problemIndex)},
+		"programTypeId":         {programTypeID},
+		"contestId":             {strconv.Itoa(contestID)},
+		"source":                {source},
+		"tabSize":               {"4"},
+		"_tta":                  {"594"},
+		"sourceCodeConfirmed":   {"true"},
+	}
+	// The token travels in the query string as well as the body, exactly as the
+	// site's own form does.
+	resp, err := s.postForm(path+"?csrf_token="+csrf[1], form)
+	if err != nil {
+		return err
+	}
+	return submitOutcome(resp)
+}
+
+// submitOutcome reads the page Codeforces answers with. An error span is the
+// authoritative failure signal — it carries "You have submitted exactly the same
+// code before" and every compile-time rejection.
+func submitOutcome(resp string) error {
+	if m := errSpanRe.FindStringSubmatch(resp); m != nil {
+		if msg := strings.TrimSpace(htmlText(m[1])); msg != "" {
+			return fmt.Errorf("Codeforces menolak submit: %s", msg)
+		}
+	}
+	// A successful submit redirects to the "my submissions" table.
+	if strings.Contains(resp, "submitted successfully") ||
+		strings.Contains(resp, "id=\"submissions\"") ||
+		strings.Contains(resp, "status-frame-datatable") {
+		return nil
+	}
+	if m := successMsgRe.FindStringSubmatch(resp); m != nil {
+		return fmt.Errorf("Codeforces menjawab: %s", strings.TrimSpace(m[1]))
+	}
+	return fmt.Errorf("hasil submit tidak bisa dipastikan — halaman balasan tidak dikenali")
+}
+
+// RegisterContest signs the account up for a contest. The form's own hidden inputs
+// are replayed rather than guessed, because the field set differs between an
+// ordinary round and one with "extra registration", and a wrong guess registers
+// nothing while looking like it worked.
+func (s *WebSession) RegisterContest(contestID int) error {
+	path := fmt.Sprintf("/contestRegistration/%d", contestID)
+	body, err := s.get(path)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(body, "You have already registered") ||
+		strings.Contains(body, "already registered for the contest") {
+		return nil // idempotent: already in
+	}
+	csrf := csrfRe.FindStringSubmatch(body)
+	if csrf == nil {
+		return fmt.Errorf("csrf token tidak ditemukan di halaman registrasi — sesi kedaluwarsa, atau registrasi belum/sudah tidak dibuka")
+	}
+
+	form := url.Values{
+		"csrf_token": {csrf[1]},
+		"ftaa":       {s.ftaa},
+		"bfaa":       {s.bfaa},
+		"_tta":       {"176"},
+	}
+	for name, value := range hiddenInputs(body) {
+		if _, taken := form[name]; !taken {
+			form.Set(name, value)
+		}
+	}
+	resp, err := s.postForm(path, form)
+	if err != nil {
+		return err
+	}
+	if m := errSpanRe.FindStringSubmatch(resp); m != nil {
+		if msg := strings.TrimSpace(htmlText(m[1])); msg != "" {
+			return fmt.Errorf("Codeforces menolak registrasi: %s", msg)
+		}
+	}
+	return nil
+}
+
+// hiddenInputs collects every hidden field on a page, so a form can be replayed
+// without hardcoding its shape.
+func hiddenInputs(body string) map[string]string {
+	out := map[string]string{}
+	for _, tag := range hiddenInputRe.FindAllString(body, -1) {
+		attrs := map[string]string{}
+		for _, m := range attrRe.FindAllStringSubmatch(tag, -1) {
+			attrs[m[1]] = m[2]
+		}
+		if n := attrs["name"]; n != "" {
+			out[n] = attrs["value"]
+		}
+	}
+	return out
+}
+
+func htmlText(s string) string {
+	s = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(s, "")
+	r := strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&nbsp;", " ")
+	return strings.TrimSpace(r.Replace(s))
+}

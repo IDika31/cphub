@@ -65,7 +65,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authSvc)
 	graderHandler := handler.NewGraderHandler(cfg.Grader, grader.GetQueue(), db)
 	syncHandler := handler.NewSyncHandler(problemRepo, submissionRepo, db)
-	problemHandler := handler.NewProblemHandler(problemRepo, codeforces.NewScraper())
+	problemHandler := handler.NewProblemHandler(problemRepo, codeforces.NewScraper(), codeforces.NewAPI(cfg.CFAPIKey, cfg.CFAPISecret))
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
 	dashboardHandler := handler.NewDashboardHandler(db)
 	accountHandler := handler.NewAccountHandler(db, cfg.CF.ClientID, cfg.CF.ClientSecret, cfg.CF.RedirectURL)
@@ -74,6 +74,8 @@ func main() {
 	extKeyHandler := handler.NewExtensionKeyHandler(db)
 	tlxImportHandler := handler.NewTLXImportHandler(db, problemRepo)
 	tlxSubmitHandler := handler.NewTLXSubmitHandler(db, problemRepo, submissionRepo)
+	cfSyncHandler := handler.NewCFSyncHandler(db, cfg.CFAPIKey, cfg.CFAPISecret)
+	cfWebHandler := handler.NewCFWebHandler(db, cfg.CFAPIKey, cfg.CFAPISecret, cfg.CredEncKey)
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
@@ -87,7 +89,7 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, extKeyHandler, tlxImportHandler, tlxSubmitHandler, cfg)
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, extKeyHandler, tlxImportHandler, tlxSubmitHandler, cfSyncHandler, cfWebHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -111,6 +113,8 @@ func registerRoutes(
 	extKeyHandler *handler.ExtensionKeyHandler,
 	tlxImportHandler *handler.TLXImportHandler,
 	tlxSubmitHandler *handler.TLXSubmitHandler,
+	cfSyncHandler *handler.CFSyncHandler,
+	cfWebHandler *handler.CFWebHandler,
 	cfg *config.Config,
 ) {
 	// Health
@@ -197,6 +201,23 @@ func registerRoutes(
 	dashboard.Get("/activity", dashboardHandler.Activity)
 	dashboard.Get("/heatmap", dashboardHandler.Heatmap)
 	dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
+
+	// Codeforces via the official API. Separate from /api/sync, which is the
+	// extension's HMAC-signed door: these are user-triggered from the web app, so
+	// they sit behind the JWT like every other page action.
+	cf := app.Group("/api/cf", middleware.AuthRequired(cfg.JWT))
+	cf.Post("/problemset/sync", cfSyncHandler.SyncProblemset)
+	cf.Post("/contests/sync", cfSyncHandler.SyncContests)
+	cf.Post("/contests/:id/problems/sync", cfSyncHandler.SyncContestProblems)
+
+	// Codeforces web session: the three things the official API has no method for.
+	cf.Post("/login", cfWebHandler.Login)
+	cf.Get("/languages", cfWebHandler.Languages)
+	cf.Post("/submit", cfWebHandler.Submit)
+
+	contests := app.Group("/api/contests", middleware.AuthRequired(cfg.JWT))
+	contests.Get("/", cfSyncHandler.ListContests)
+	contests.Post("/:id/register", cfWebHandler.Register)
 
 	// Settings
 	settingsGroup := app.Group("/api/settings", middleware.AuthRequired(cfg.JWT))

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
-  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown, Plus,
+  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown, Plus, Trophy,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
@@ -22,6 +22,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/problems", label: "Problemset", icon: Files, hasSubmenu: true },
+  { href: "/contests", label: "Contest", icon: Trophy },
   { href: "/submissions", label: "Submission", icon: ClipboardList, hasSubmenu: true },
   { href: "/connections", label: "Connections", icon: LinkIcon },
   { href: "/settings", label: "Settings", icon: Settings },

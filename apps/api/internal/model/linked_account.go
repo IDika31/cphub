@@ -22,6 +22,14 @@ type LinkedAccount struct {
 	AccessToken  string     `gorm:"size:500" json:"-"`
 	RefreshToken string     `gorm:"size:500" json:"-"`
 	TokenExpiry  *time.Time `json:"-"`
+	// Codeforces has no write API, so submitting and registering ride on a stored
+	// browser session: SessionData is the cookie jar plus the ftaa/bfaa pair the
+	// login was tied to. PasswordEnc is AES-GCM ciphertext under CRED_ENC_KEY and
+	// only present when the user asked for unattended re-login. Neither is ever
+	// serialised to a client.
+	SessionData      string     `gorm:"type:text" json:"-"`
+	PasswordEnc      string     `gorm:"type:text" json:"-"`
+	SessionCheckedAt *time.Time `json:"sessionCheckedAt,omitempty"`
 	Rating       int        `gorm:"default:0" json:"rating"`
 	MaxRating    int        `gorm:"default:0" json:"maxRating"`
 	AvatarURL    string     `gorm:"size:500" json:"avatarUrl,omitempty"`

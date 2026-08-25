@@ -210,10 +210,10 @@ func parseCFIDToken(idToken string) (*CFUserInfo, error) {
 	}
 
 	var claims struct {
-		Handle  string `json:"handle"`
-		Rating  int    `json:"rating"`
-		Avatar  string `json:"picture"` // OIDC standard claim
-		Email   string `json:"email"`
+		Handle string `json:"handle"`
+		Rating int    `json:"rating"`
+		Avatar string `json:"picture"` // OIDC standard claim
+		Email  string `json:"email"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil, fmt.Errorf("failed to parse id_token claims: %w", err)

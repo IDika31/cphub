@@ -29,8 +29,8 @@ func (h *GraderHandler) HandleWS(c *websocket.Conn) {
 		}
 
 		var req struct {
-			Type    string `json:"type"`
-			RunID   string `json:"runId"`
+			Type  string `json:"type"`
+			RunID string `json:"runId"`
 		}
 		if err := json.Unmarshal(msg, &req); err != nil {
 			continue

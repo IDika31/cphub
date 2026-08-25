@@ -17,6 +17,8 @@ import { useToast } from "@/components/ui/toast";
 import { fetchProblem } from "@/lib/api/problems";
 import { runCode, parseTimeLimitMs, parseMemoryLimitMb, type GraderResult } from "@/lib/api/grader";
 import { submitTLX, type SubmitTLXResult } from "@/lib/api/tlx";
+import { submitCF } from "@/lib/api/codeforces";
+import { isTLXFamily } from "@/lib/providers";
 import { getDefaultTemplate, applyTemplate } from "@/lib/template";
 import { saveToLocalStorage, loadFromLocalStorage, debounce } from "@/lib/auto-save";
 import { apiClient } from "@/lib/api/client";
@@ -199,15 +201,27 @@ export default function ProblemDetailPage() {
     setRunning(false);
   }
 
-  async function handleSubmitTLX() {
+  async function handleSubmitExternal() {
     if (!code.trim() || !problem) return;
     setSubmitting(true);
     setSubmitResult(null);
     setPopupOpen(true);
     try {
-      const res = await submitTLX(problem.id, code, language, getToken());
+      // Codeforces has no submit API, so the server drives a stored browser
+      // session; TLX has one and takes the token. Both answer with a verdict, so
+      // the popup below does not care which judge it was.
+      const res =
+        problem.provider === "codeforces"
+          ? await submitCF(problem.id, code, language).then((r) => ({
+              submissionJid: String(r.submissionId),
+              verdict: r.verdict,
+              score: 0,
+              pending: r.pending,
+              url: r.url,
+            }))
+          : await submitTLX(problem.id, code, language, getToken());
       setSubmitResult(res);
-      if (res.verdict === "AC") {
+      if (res.verdict === "AC" || res.verdict === "OK") {
         setProblem({ ...problem, status: "solved" });
       }
     } catch (err: unknown) {
@@ -218,7 +232,7 @@ export default function ProblemDetailPage() {
         pending: false,
         url: "",
       });
-      console.error("TLX submit failed", err);
+      addToast("error", `Submit gagal: ${(err as Error).message || "cek koneksi & akun di Connections"}`);
     }
     setSubmitting(false);
   }
@@ -309,9 +323,17 @@ export default function ProblemDetailPage() {
             <Button variant="primary" onClick={handleRun} disabled={running}>
               <Play className="w-3 h-3" /> {running ? "Running..." : "Run"}
             </Button>
-            {problem.provider === "tlx" && (
-              <Button variant="default" onClick={handleSubmitTLX} disabled={submitting}>
-                <UploadCloud className="w-3 h-3" /> {submitting ? "Submitting..." : "Submit TLX"}
+            {/* Self-hosted TLX instances submit through the same endpoint as the
+                official one, so the button follows the family rather than the exact
+                provider string. */}
+            {(isTLXFamily(problem.provider) || problem.provider === "codeforces") && (
+              <Button variant="default" onClick={handleSubmitExternal} disabled={submitting}>
+                <UploadCloud className="w-3 h-3" />{" "}
+                {submitting
+                  ? "Submitting..."
+                  : problem.provider === "codeforces"
+                    ? "Submit CF"
+                    : "Submit TLX"}
               </Button>
             )}
             {submitResult && (

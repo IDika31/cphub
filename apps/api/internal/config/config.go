@@ -20,8 +20,17 @@ type Config struct {
 	JWT    JWTConfig
 	Google OAuthConfig
 	CF     OAuthConfig
-	Grader GraderConfig
-	Log    LogConfig
+	// Codeforces API key/secret from codeforces.com/settings/api. Optional and
+	// unrelated to the OAuth pair above: it only widens anonymous API reads to
+	// data private to that account.
+	CFAPIKey    string
+	CFAPISecret string
+	// CredEncKey is the 32-byte AES-GCM key that protects a stored Codeforces
+	// password. Empty means no password is ever written to the database, and an
+	// expired session has to be re-entered by hand.
+	CredEncKey string
+	Grader     GraderConfig
+	Log        LogConfig
 }
 
 type DBConfig struct {
@@ -160,6 +169,9 @@ func Load() *Config {
 			ClientSecret: getEnv("CF_CLIENT_SECRET", ""),
 			RedirectURL:  getEnv("CF_REDIRECT_URL", ""),
 		},
+		CFAPIKey:    getEnv("CF_API_KEY", ""),
+		CFAPISecret: getEnv("CF_API_SECRET", ""),
+		CredEncKey:  getEnv("CRED_ENC_KEY", ""),
 		Grader: GraderConfig{
 			MaxConcurrent:     getEnvInt("GRADER_MAX_CONCURRENT", 5),
 			TimeoutSeconds:    getEnvInt("GRADER_TIMEOUT_SECONDS", 5),

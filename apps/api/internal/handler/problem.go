@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"log"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/IDika31/cphub/api/internal/provider/codeforces"
@@ -18,10 +20,16 @@ var cfProblemIDRe = regexp.MustCompile(`^(\d+)([A-Za-z]\d*)$`)
 type ProblemHandler struct {
 	repo      *repository.ProblemRepository
 	cfScraper *codeforces.Scraper
+	// cfAPI is the fallback when scraping is refused. Codeforces put every HTML
+	// page behind a Cloudflare challenge, so FetchProblem now returns 403 from a
+	// server and lazy-import used to answer 404 — the problem simply could not be
+	// opened. The API still serves metadata, which is enough to create the row and
+	// let the extension fill in the statement later.
+	cfAPI *codeforces.API
 }
 
-func NewProblemHandler(repo *repository.ProblemRepository, cfScraper *codeforces.Scraper) *ProblemHandler {
-	return &ProblemHandler{repo: repo, cfScraper: cfScraper}
+func NewProblemHandler(repo *repository.ProblemRepository, cfScraper *codeforces.Scraper, cfAPI *codeforces.API) *ProblemHandler {
+	return &ProblemHandler{repo: repo, cfScraper: cfScraper, cfAPI: cfAPI}
 }
 
 func (h *ProblemHandler) List(c *fiber.Ctx) error {
@@ -190,8 +198,65 @@ func (h *ProblemHandler) GetByProblemID(c *fiber.Ctx) error {
 				return c.JSON(p)
 			}
 			log.Printf("[problem] lazy-import scrape failed for %s: %v", problemID, fetchErr)
+			// Scraping is blocked, not broken: fall back to API metadata so the
+			// problem is at least openable.
+			if p := h.cfMetadata(contestID, letter); p != nil {
+				if upErr := h.repo.Upsert(p); upErr != nil {
+					log.Printf("[problem] metadata upsert failed for %s: %v", problemID, upErr)
+				}
+				if fresh, e := h.repo.FindByProblemID(p.ProblemID); e == nil {
+					return c.JSON(fresh)
+				}
+				return c.JSON(p)
+			}
 		}
 	}
 
 	return c.Status(404).JSON(fiber.Map{"error": "Problem not found"})
+}
+
+// cfMetadata builds a statement-less problem from the official API. Returns nil
+// when the API cannot supply it either, so the caller still answers 404 rather
+// than inventing a row.
+//
+// ponytail: one contest.standings call per missed problem, and Codeforces only
+// serves that method with no extra parameters — meaning the whole ranklist travels
+// to hand back a dozen problems. Fine because it happens once per problem ever;
+// if it starts to hurt, import the problemset once (POST /api/cf/problemset/sync)
+// and this path stops being reached.
+func (h *ProblemHandler) cfMetadata(contestID, letter string) *model.Problem {
+	if h.cfAPI == nil {
+		return nil
+	}
+	id, err := strconv.Atoi(contestID)
+	if err != nil {
+		return nil
+	}
+	problems, contest, err := h.cfAPI.ContestProblems(id)
+	if err != nil {
+		log.Printf("[problem] cf api metadata for %s%s failed: %v", contestID, letter, err)
+		return nil
+	}
+	for _, p := range problems {
+		if !strings.EqualFold(p.Index, letter) {
+			continue
+		}
+		tags, _ := json.Marshal(p.Tags)
+		group := ""
+		if contest != nil {
+			group = contest.Name
+		}
+		log.Printf("[problem] %s%s created from API metadata — statement needs the extension (CF HTML is behind Cloudflare)", contestID, letter)
+		return &model.Problem{
+			Provider:     "codeforces",
+			ProblemID:    p.Ref(),
+			Title:        p.Name,
+			ProblemGroup: group,
+			Difficulty:   p.Rating,
+			Tags:         string(tags),
+			URL:          p.URL(),
+			SyncedAt:     time.Now(),
+		}
+	}
+	return nil
 }
