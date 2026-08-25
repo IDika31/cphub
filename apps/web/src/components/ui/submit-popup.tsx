@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { X, CheckCircle2, XCircle, Clock, Loader2, ExternalLink, Trophy } from "lucide-react";
+import { providerLabel } from "@/lib/providers";
 
 interface SubmitPopupProps {
   open: boolean;
@@ -34,10 +35,6 @@ function langLabel(lang: string) {
     nodejs: "JavaScript",
   };
   return map[lang] || lang;
-}
-
-function providerLabel(p: string) {
-  return p === "codeforces" ? "Codeforces" : p === "tlx" ? "TLX TOKI" : p;
 }
 
 export default function SubmitPopup({

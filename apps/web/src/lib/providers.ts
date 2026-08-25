@@ -9,7 +9,7 @@ export const PROVIDER_CODEFORCES = "codeforces";
 const LABELS: Record<string, string> = {
   [PROVIDER_CODEFORCES]: "Codeforces",
   [PROVIDER_TLX]: "TLX TOKI",
-  [PROVIDER_TLX_CUSTOM]: "tlx-custom",
+  [PROVIDER_TLX_CUSTOM]: "TLX Custom",
   google: "Google",
 };
 
@@ -33,6 +33,28 @@ export function providerLabel(provider: string, handle?: string, name?: string):
 export function accountIdentity(label: string, handle?: string, providerUsername?: string): string {
   const id = providerUsername?.trim() || handle?.trim() || "";
   return id && !label.includes(id) ? id : "";
+}
+
+/** Nav entries for the per-judge submenus: one per `?provider=` value, because that
+ *  string is the only granularity the problem and submission lists filter on. Two
+ *  self-hosted instances therefore collapse into a single counted entry instead of
+ *  two links pointing at the same list. */
+export function judgeNavEntries<T extends { provider: string; handle?: string; displayName?: string }>(
+  accounts: T[],
+): Array<{ provider: string; label: string }> {
+  const grouped = new Map<string, T[]>();
+  for (const a of accounts) {
+    const rows = grouped.get(a.provider);
+    if (rows) rows.push(a);
+    else grouped.set(a.provider, [a]);
+  }
+  return Array.from(grouped, ([provider, rows]) => ({
+    provider,
+    label:
+      rows.length === 1
+        ? providerLabel(provider, rows[0].handle, rows[0].displayName)
+        : `${providerLabel(provider)} (${rows.length})`,
+  }));
 }
 
 /** Badge variant per provider, so colour carries the same distinction. */

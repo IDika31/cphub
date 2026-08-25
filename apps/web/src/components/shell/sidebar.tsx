@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
+import { judgeNavEntries } from "@/lib/providers";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 
 interface NavItem {
@@ -58,6 +59,11 @@ function SidebarInner({ onNavigate }: SidebarProps) {
       .then((res) => setProviders(res.data.filter((a) => a.isConnected)))
       .catch(() => {});
   }, []);
+
+  // The label used to be an inline ternary that fell through to the raw provider
+  // string, so a self-hosted instance appeared in the nav as the literal
+  // "tlx-custom" instead of whatever the user named it.
+  const judges = useMemo(() => judgeNavEntries(providers), [providers]);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -152,18 +158,18 @@ function SidebarInner({ onNavigate }: SidebarProps) {
                   >
                     Semua
                   </Link>
-                  {providers.map((p) => (
-                    <div key={p.provider} className="flex items-center group">
+                  {judges.map((j) => (
+                    <div key={j.provider} className="flex items-center group">
                       <Link
-                        href={`${item.href}?provider=${p.provider}`}
+                        href={`${item.href}?provider=${j.provider}`}
                         onClick={onNavigate}
                         className={`flex-1 block px-[10px] py-[5px] rounded-[6px] text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] ${
-                          pathname.startsWith(item.href) && providerParam === p.provider ? "text-[#a78bfa]" : "text-[#a1a1aa] hover:text-[#e4e4e7]"
+                          pathname.startsWith(item.href) && providerParam === j.provider ? "text-[#a78bfa]" : "text-[#a1a1aa] hover:text-[#e4e4e7]"
                         }`}
                       >
-                        {p.provider === "codeforces" ? "Codeforces" : p.provider === "tlx" ? "TLX TOKI" : p.provider}
+                        {j.label}
                       </Link>
-                      {p.provider === "tlx" && item.href === "/problems" && (
+                      {j.provider === "tlx" && item.href === "/problems" && (
                         <button
                           onClick={() => setImportTLXOpen(true)}
                           aria-label="Import TLX Problem"

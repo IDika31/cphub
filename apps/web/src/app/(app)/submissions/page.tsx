@@ -21,7 +21,7 @@ const PROVIDERS = [
   { value: "", label: "Semua" },
   { value: "codeforces", label: "Codeforces" },
   { value: "tlx", label: "TLX TOKI" },
-  { value: "tlx-custom", label: "TLX custom" },
+  { value: "tlx-custom", label: "TLX Custom" },
 ];
 
 

@@ -18,7 +18,7 @@ const PROVIDERS: Array<{ value: string; label: string }> = [
   { value: "", label: "Semua" },
   { value: "codeforces", label: "Codeforces" },
   { value: "tlx", label: "TLX TOKI" },
-  { value: "tlx-custom", label: "TLX custom" },
+  { value: "tlx-custom", label: "TLX Custom" },
 ];
 
 function parseTags(raw: string): string[] {
