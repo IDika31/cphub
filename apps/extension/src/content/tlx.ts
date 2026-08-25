@@ -1,4 +1,5 @@
 import { MESSAGE_TYPES } from "../shared/messages";
+import { registerOpenEditorHotkey } from "../shared/hotkey";
 import { detectPageType } from "./detector";
 import { logger } from "../shared/logger";
 
@@ -25,3 +26,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 logger.info("TLX content script loaded");
+
+registerOpenEditorHotkey();

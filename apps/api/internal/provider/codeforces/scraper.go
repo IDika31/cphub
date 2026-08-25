@@ -63,21 +63,129 @@ func (s *Scraper) FetchProblem(contestID, letter string) (*model.Problem, error)
 }
 
 func parseHTML(html, problemID, pageURL string) *model.Problem {
+	// `.problem-statement` wraps the header, the body, the input/output specs, the
+	// samples AND the note. Handing the whole thing over as Statement while also
+	// extracting inputSpec/outputSpec/note separately made the editor render the
+	// limits and both specs twice.
+	statement := extractStatementBody(extractClassDiv(html, "problem-statement"))
+
 	return &model.Problem{
-		ID:          uuid.New(),
-		Provider:    "codeforces",
-		ProblemID:   problemID,
-		Title:       extractTitle(html),
-		Statement:   extractClassDiv(html, "problem-statement"),
-		InputSpec:   extractClassDiv(html, "input-specification"),
-		OutputSpec:  extractClassDiv(html, "output-specification"),
-		Note:        extractClassDiv(html, "note"),
-		TimeLimit:   extractLimitText(html, "time-limit"),
-		MemoryLimit: extractLimitText(html, "memory-limit"),
-		Tags:        extractTags(html),
-		URL:         pageURL,
-		TestCases:   extractSampleTests(html),
+		ID:           uuid.New(),
+		Provider:     "codeforces",
+		ProblemID:    problemID,
+		Title:        extractTitle(html),
+		Statement:    statement,
+		InputSpec:    extractClassDiv(html, "input-specification"),
+		OutputSpec:   extractClassDiv(html, "output-specification"),
+		Note:         extractClassDiv(html, "note"),
+		ProblemGroup: extractContestName(html, problemID),
+		TimeLimit:    extractLimitText(html, "time-limit"),
+		MemoryLimit:  extractLimitText(html, "memory-limit"),
+		Tags:         extractTags(html),
+		URL:          pageURL,
+		TestCases:    extractSampleTests(html),
 	}
+}
+
+// zoneMarkers are the sections the problem pane renders as its own labelled
+// zones, so the statement body must stop before the first of them.
+var zoneMarkers = []string{
+	`class="input-specification"`,
+	`class="output-specification"`,
+	`class="sample-tests"`,
+	`class="note"`,
+}
+
+// extractStatementBody trims a full `.problem-statement` down to just the prose
+// body: no header (title and limits are shown from their own fields) and nothing
+// from the labelled zones.
+func extractStatementBody(ps string) string {
+	if ps == "" {
+		return ""
+	}
+	body := ps
+
+	if h := strings.Index(body, `class="header"`); h >= 0 {
+		if end := matchingDivEnd(body, h); end > 0 {
+			body = body[end:]
+		}
+	}
+
+	cut := len(body)
+	for _, marker := range zoneMarkers {
+		if i := strings.Index(body, marker); i >= 0 && i < cut {
+			cut = i
+		}
+	}
+	body = body[:cut]
+
+	// The marker sits inside an opening tag, so the cut leaves a dangling "<div".
+	if i := strings.LastIndex(body, "<div"); i >= 0 && !strings.Contains(body[i:], ">") {
+		body = body[:i]
+	}
+	return strings.TrimSpace(body)
+}
+
+// matchingDivEnd takes an index pointing anywhere inside a <div ...> opening tag
+// and returns the index just past its balanced </div>, or -1.
+func matchingDivEnd(s string, idxInsideOpenTag int) int {
+	open := strings.LastIndex(s[:idxInsideOpenTag], "<div")
+	if open < 0 {
+		return -1
+	}
+	gt := strings.Index(s[open:], ">")
+	if gt < 0 {
+		return -1
+	}
+	pos := open + gt + 1
+	depth := 1
+	for depth > 0 && pos < len(s) {
+		nextOpen := strings.Index(s[pos:], "<div")
+		nextClose := strings.Index(s[pos:], "</div>")
+		if nextClose < 0 {
+			return -1
+		}
+		if nextOpen >= 0 && nextOpen < nextClose {
+			depth++
+			pos += nextOpen + 4
+			continue
+		}
+		depth--
+		pos += nextClose + 6
+	}
+	if depth != 0 {
+		return -1
+	}
+	return pos
+}
+
+// extractContestName pulls the contest/round title from the sidebar link that
+// points at this problem's contest, so the editor template can stamp
+// problemgroup automatically instead of leaving it blank.
+func extractContestName(html, problemID string) string {
+	m := regexp.MustCompile(`^(\d+)`).FindStringSubmatch(problemID)
+	if m == nil {
+		return ""
+	}
+	re := regexp.MustCompile(`<a[^>]+href="/contest/` + m[1] + `"[^>]*>([^<]+)</a>`)
+	for _, hit := range re.FindAllStringSubmatch(html, -1) {
+		name := strings.TrimSpace(htmlUnescape(hit[1]))
+		// Skip navigation links like "Problems" / "Submit" that share the href.
+		if len(name) > 6 && !strings.EqualFold(name, "problems") {
+			return name
+		}
+	}
+	return ""
+}
+
+func htmlUnescape(s string) string {
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&quot;", "\"")
+	s = strings.ReplaceAll(s, "&#39;", "'")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	return s
 }
 
 func extractTitle(html string) string {

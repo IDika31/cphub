@@ -55,3 +55,6 @@ coverage/
 
 # Bun
 bun.lockb
+
+# graphify knowledge-graph output (tool artifact, regenerable)
+graphify-out/

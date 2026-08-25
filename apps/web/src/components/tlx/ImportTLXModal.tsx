@@ -41,7 +41,7 @@ export default function ImportTLXModal({ open, onClose, onSuccess }: Props) {
   return (
     <Modal open={open} onClose={handleClose} title="Import Problem TLX">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <p className="text-[13px] text-[#71717a]">
+        <p className="text-[13px] text-[#a1a1aa]">
           Paste URL problem TLX — contoh:{" "}
           <span className="text-[#a1a1aa]">
             https://tlx.toki.id/problems/ioi-2024/day1a
@@ -55,7 +55,7 @@ export default function ImportTLXModal({ open, onClose, onSuccess }: Props) {
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://tlx.toki.id/problems/..."
             required
-            className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#8b5cf6]"
+            className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
           />
         </div>
         {error && <p className="text-[12px] text-[#ef4444]">{error}</p>}

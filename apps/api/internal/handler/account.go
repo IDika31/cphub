@@ -3,13 +3,14 @@ package handler
 import (
 	"log"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/IDika31/cphub/api/internal/database"
 	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/IDika31/cphub/api/internal/provider/tlx"
-	"github.com/google/uuid"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -125,4 +126,74 @@ func (h *AccountHandler) LinkTLX(c *fiber.Ctx) error {
 
 	log.Printf("[tlx] linked TLX account: %s (user=%s)", loginResult.Username, userID)
 	return c.JSON(fiber.Map{"message": "Akun TLX berhasil dihubungkan", "handle": loginResult.Username})
+}
+
+// LinkTLXCustom logs into a self-hosted Judgels/TLX instance. Judgels routes
+// everything under one configurable apiUrl, so the only difference from the
+// official TLX is that base — the login call, /users/me and the submission feed
+// are byte-for-byte the same endpoints. The instance row is created by the
+// extension (POST /api/sync/tlx-hosts); this fills in its credentials.
+// Shared with the sync handler, which creates these rows.
+const handler_tlxCustom = ProviderTLXCustom
+
+func (h *AccountHandler) LinkTLXCustom(c *fiber.Ctx) error {
+	uid, err := uuid.Parse(c.Locals("userId").(string))
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthenticated"})
+	}
+
+	var input struct {
+		Host     string `json:"host"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+	host := strings.ToLower(strings.TrimSpace(input.Host))
+	if host == "" || input.Username == "" || input.Password == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "host, username dan password wajib diisi"})
+	}
+
+	var account model.LinkedAccount
+	if err := h.db.Where("user_id = ? AND provider = ? AND handle = ?", uid, handler_tlxCustom, host).
+		First(&account).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Instance " + host + " belum terdaftar — tambahkan dulu di extension Settings",
+		})
+	}
+
+	// provider_user_id carries the API host the extension reported. Judgels
+	// deployments conventionally serve the API from api.<host>, so that is the
+	// fallback rather than failing outright.
+	apiHost := strings.TrimSpace(account.ProviderUserID)
+	if apiHost == "" {
+		apiHost = "api." + host
+	}
+
+	client := tlx.NewClientFor(apiHost)
+	login, err := client.Login(input.Username, input.Password)
+	if err != nil {
+		log.Printf("[tlx-custom] login failed on %s for %s: %v", client.APIBase(), input.Username, err)
+		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	now := time.Now()
+	if err := h.db.Model(&account).Updates(map[string]interface{}{
+		"provider_username": login.Username,
+		"access_token":      login.Token,
+		"is_connected":      true,
+		"linked_at":         now,
+	}).Error; err != nil {
+		log.Printf("[tlx-custom] could not store credentials for %s: %v", host, err)
+		return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan kredensial"})
+	}
+
+	log.Printf("[tlx-custom] linked %s as %s via %s", host, login.Username, client.APIBase())
+	return c.JSON(fiber.Map{
+		"message":  "Instance terhubung",
+		"host":     host,
+		"apiBase":  client.APIBase(),
+		"username": login.Username,
+	})
 }

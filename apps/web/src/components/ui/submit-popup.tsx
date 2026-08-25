@@ -76,7 +76,7 @@ export default function SubmitPopup({
         <div className="flex justify-end px-[14px] pt-[10px]">
           <button
             onClick={onClose}
-            className="p-1 rounded-[6px] text-[#71717a] hover:bg-[#1f1f23] hover:text-[#e4e4e7] transition-colors"
+            className="w-9 h-9 inline-flex items-center justify-center rounded-[6px] text-[#a1a1aa] hover:bg-[#1f1f23] hover:text-[#e4e4e7] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
           >
             <X className="w-4 h-4" />
           </button>
@@ -111,20 +111,20 @@ export default function SubmitPopup({
         <div className="border-t border-[rgba(255,255,255,0.06)] mx-[16px]" />
         <div className="px-[24px] py-[14px] space-y-[10px]">
           <div className="flex items-center justify-between">
-            <span className="text-[12px] text-[#71717a]">Problem</span>
+            <span className="text-[12px] text-[#a1a1aa]">Problem</span>
             <span className="text-[12px] text-[#e4e4e7] font-medium text-right max-w-[200px] truncate">{problemTitle}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-[12px] text-[#71717a]">Language</span>
+            <span className="text-[12px] text-[#a1a1aa]">Language</span>
             <span className="text-[12px] text-[#e4e4e7]">{langLabel(language)}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-[12px] text-[#71717a]">Judge</span>
+            <span className="text-[12px] text-[#a1a1aa]">Judge</span>
             <span className="text-[12px] text-[#e4e4e7]">{providerLabel(provider)}</span>
           </div>
           {!pending && verdict && verdict !== "ERR" && (
             <div className="flex items-center justify-between">
-              <span className="text-[12px] text-[#71717a]">Verdict</span>
+              <span className="text-[12px] text-[#a1a1aa]">Verdict</span>
               <span className="text-[12px] font-mono font-semibold" style={{ color: cfg.text }}>{verdict}</span>
             </div>
           )}
@@ -139,7 +139,7 @@ export default function SubmitPopup({
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full py-[8px] rounded-[8px] bg-[rgba(139,92,246,0.12)] text-[#8b5cf6] text-[12px] font-medium hover:bg-[rgba(139,92,246,0.2)] transition-colors"
+                className="flex items-center justify-center gap-2 w-full py-[8px] rounded-[8px] bg-[rgba(139,92,246,0.12)] text-[#a78bfa] text-[12px] font-medium hover:bg-[rgba(139,92,246,0.2)] transition-colors"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 Lihat di {providerLabel(provider)}
@@ -152,8 +152,8 @@ export default function SubmitPopup({
           <>
             <div className="border-t border-[rgba(255,255,255,0.06)] mx-[16px]" />
             <div className="px-[24px] py-[12px]">
-              <div className="flex items-center justify-center gap-2 text-[11px] text-[#71717a]">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#8b5cf6] animate-pulse" />
+              <div className="flex items-center justify-center gap-2 text-[11px] text-[#a1a1aa]">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
                 Menunggu hasil dari judge...
               </div>
             </div>

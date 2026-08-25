@@ -1,80 +1,80 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu } from "lucide-react";
 import Sidebar from "./sidebar";
 
+/** Desktop/mobile split is done in CSS (`md:` breakpoints) rather than by
+ *  measuring window width in an effect — measuring paints the wrong layout
+ *  first and then jumps. Collapse itself lives entirely in <Sidebar/>, so there
+ *  is exactly one collapse control instead of two competing ones. */
 export default function ShellLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [isMobile, setIsMobile] = useState(false);
-  const [mobileOverlay, setMobileOverlay] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
-    function check() {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      setSidebarOpen(!mobile);
+    if (!drawerOpen) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setDrawerOpen(false);
     }
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
+    document.addEventListener("keydown", onEsc);
 
-  if (isMobile) {
-    return (
-      <div className="flex h-screen overflow-hidden bg-[#0f0f10]">
-        {/* Mobile overlay */}
-        {mobileOverlay && (
-          <div className="fixed inset-0 z-40 flex">
-            <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOverlay(false)} />
-            <div className="relative z-50">
-              <Sidebar />
-            </div>
-          </div>
-        )}
+    // Growing past the breakpoint hides the drawer via CSS; close it too so the
+    // body scroll lock does not outlive it.
+    const desktop = window.matchMedia("(min-width: 768px)");
+    function onDesktop(e: MediaQueryListEvent) {
+      if (e.matches) setDrawerOpen(false);
+    }
+    desktop.addEventListener("change", onDesktop);
 
-        {/* Mobile header */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="h-[44px] border-b border-[rgba(255,255,255,0.08)] flex items-center px-[14px] bg-[#18181b]">
-            <button
-              onClick={() => setMobileOverlay(true)}
-              className="p-1 mr-3 rounded-[6px] text-[#71717a] hover:bg-[#1f1f23] hover:text-[#e4e4e7]"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <span className="text-[16px] font-semibold text-[#8b5cf6]">CPHub</span>
-          </div>
-          <main className="flex-1 flex flex-col min-h-0">{children}</main>
-        </div>
-      </div>
-    );
-  }
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onEsc);
+      desktop.removeEventListener("change", onDesktop);
+    };
+  }, [drawerOpen]);
 
-  // Desktop: collapsible sidebar
   return (
     <div className="flex h-screen overflow-hidden bg-[#0f0f10]">
-      {sidebarOpen && <Sidebar />}
-      {!sidebarOpen && (
-        <div className="w-[44px] flex flex-col items-center py-[10px] gap-3 bg-[#18181b] border-r border-[rgba(255,255,255,0.08)]">
-          <button onClick={() => setSidebarOpen(true)} className="p-1 rounded-[6px] text-[#71717a] hover:bg-[#1f1f23] hover:text-[#e4e4e7]">
-            <Menu className="w-4 h-4" />
-          </button>
+      {/* Desktop: sidebar inline */}
+      <div className="hidden md:flex">
+        <Sidebar />
+      </div>
+
+      {/* Mobile: sidebar as a dismissable drawer */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-40 flex md:hidden">
+          <button
+            type="button"
+            aria-label="Tutup menu"
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <div className="relative z-50">
+            {/* Tapping a link must dismiss the drawer, otherwise it keeps
+                covering the page the user just navigated to. */}
+            <Sidebar onNavigate={() => setDrawerOpen(false)} />
+          </div>
         </div>
       )}
-      <main className="flex-1 flex flex-col min-w-0">
-        {/* Collapse indicator */}
-        {sidebarOpen && (
-          <div className="absolute left-[216px] top-[10px] z-10">
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="w-5 h-5 flex items-center justify-center rounded-full bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#52525b] hover:text-[#e4e4e7] hover:bg-[#18181b]"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        )}
-        {children}
-      </main>
+
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="md:hidden h-[44px] border-b border-[rgba(255,255,255,0.08)] flex items-center px-[14px] bg-[#18181b] flex-shrink-0">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Buka menu"
+            aria-expanded={drawerOpen}
+            className="w-9 h-9 -ml-1 mr-2 inline-flex items-center justify-center rounded-[6px] text-[#a1a1aa] hover:bg-[#1f1f23] hover:text-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <span className="text-[16px] font-semibold text-[#a78bfa]">CPHub</span>
+        </div>
+        <main className="flex-1 flex flex-col min-h-0">{children}</main>
+      </div>
     </div>
   );
 }

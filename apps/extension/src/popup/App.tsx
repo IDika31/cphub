@@ -11,12 +11,16 @@ export default function App() {
   const [latency, setLatency] = useState(0);
   const [syncedCount, setSyncedCount] = useState(0);
   const [apiUrl, setApiUrl] = useState("http://localhost:3001");
-  const [hmacSecret, setHmacSecret] = useState("");
+  const [webUrl, setWebUrl] = useState("http://localhost:3000");
+  const [pairingToken, setPairingToken] = useState("");
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [customHosts, setCustomHosts] = useState<{host: string; apiHost?: string}[]>([]);
+  // name is a label the user picks for the instance; host stays the identity, so
+  // CPHub can show "COMPFEST CPC" instead of the raw hostname.
+  const [customHosts, setCustomHosts] = useState<{host: string; apiHost?: string; name?: string}[]>([]);
   const [newHost, setNewHost] = useState("");
   const [newApiHost, setNewApiHost] = useState("");
+  const [newName, setNewName] = useState("");
 
   async function loadStatus() {
     try {
@@ -29,9 +33,10 @@ export default function App() {
 
   useEffect(() => {
     loadStatus();
-    chrome.storage.local.get(["cphub_apiUrl", "cphub_hmacSecret"], (r) => {
+    chrome.storage.local.get(["cphub_apiUrl", "cphub_webUrl", "cphub_pairingToken"], (r) => {
       if (r.cphub_apiUrl) setApiUrl(r.cphub_apiUrl);
-      if (r.cphub_hmacSecret) setHmacSecret(r.cphub_hmacSecret);
+      if (r.cphub_webUrl) setWebUrl(r.cphub_webUrl);
+      if (r.cphub_pairingToken) setPairingToken(r.cphub_pairingToken);
     });
     chrome.storage.sync.get("customTlxHosts", (r) => {
       setCustomHosts(r.customTlxHosts ?? []);
@@ -39,7 +44,7 @@ export default function App() {
   }, []);
 
   function saveSettings() {
-    chrome.storage.local.set({ cphub_apiUrl: apiUrl, cphub_hmacSecret: hmacSecret });
+    chrome.storage.local.set({ cphub_apiUrl: apiUrl.trim().replace(/\/+$/, ""), cphub_webUrl: webUrl.trim().replace(/\/+$/, ""), cphub_pairingToken: pairingToken.trim() });
     chrome.storage.sync.set({ customTlxHosts: customHosts });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -49,10 +54,12 @@ export default function App() {
     const host = newHost.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     if (!host || customHosts.some((h) => h.host === host) || host === "tlx.toki.id") return;
     const apiHost = newApiHost.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    const next = [...customHosts, { host, ...(apiHost ? { apiHost } : {}) }];
+    const name = newName.trim().slice(0, 100);
+    const next = [...customHosts, { host, ...(apiHost ? { apiHost } : {}), ...(name ? { name } : {}) }];
     setCustomHosts(next);
     setNewHost("");
     setNewApiHost("");
+    setNewName("");
     chrome.storage.sync.set({ customTlxHosts: next });
   }
 
@@ -168,7 +175,7 @@ export default function App() {
             <div className="bg-surface rounded-xl p-1 space-y-0.5">
               {[
                 { label: "API Connection", ok: apiOk, detail: apiOk ? `${latency}ms` : "Failed", icon: "◉" },
-                { label: "HMAC Secret", ok: !!hmacSecret, detail: hmacSecret ? "Configured" : "Not set", icon: "⊡" },
+                { label: "Pairing Token", ok: !!pairingToken, detail: pairingToken ? "Paired" : "Not set — sync will be refused", icon: "⊡" },
                 { label: "Problems Synced", ok: true, detail: `${syncedCount}`, icon: "◫" },
                 { label: "Custom TLX Hosts", ok: true, detail: `${customHosts.length} host${customHosts.length !== 1 ? "s" : ""}`, icon: "◈" },
               ].map((item) => (
@@ -209,13 +216,25 @@ export default function App() {
               />
             </div>
 
-            {/* HMAC Secret */}
+            {/* Web URL */}
             <div>
-              <label className="block text-[11px] font-medium text-secondary mb-1.5">HMAC Secret</label>
+              <label className="block text-[11px] font-medium text-secondary mb-1.5">Web Dashboard URL</label>
+              <input
+                type="text"
+                value={webUrl}
+                onChange={(e) => setWebUrl(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl text-[12px] bg-surface border border-border text-primary outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+                placeholder="http://localhost:3000"
+              />
+            </div>
+
+            {/* Pairing Token */}
+            <div>
+              <label className="block text-[11px] font-medium text-secondary mb-1.5">Pairing Token</label>
               <input
                 type="password"
-                value={hmacSecret}
-                onChange={(e) => setHmacSecret(e.target.value)}
+                value={pairingToken}
+                onChange={(e) => setPairingToken(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl text-[12px] bg-surface border border-border text-primary outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-mono"
                 placeholder="Paste from CPHub Settings"
               />
@@ -225,6 +244,13 @@ export default function App() {
             <div>
               <label className="block text-[11px] font-medium text-secondary mb-1.5">Custom TLX Hosts</label>
               <div className="space-y-1.5">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-[12px] bg-surface border border-border text-primary outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+                  placeholder="Nama instance (opsional) — mis. COMPFEST CPC"
+                />
                 <input
                   type="text"
                   value={newHost}
@@ -257,10 +283,14 @@ export default function App() {
                       className="flex items-center justify-between px-3 py-2 rounded-xl bg-surface border border-border"
                     >
                       <div className="min-w-0">
-                        <span className="text-[11px] text-primary block truncate font-medium">{entry.host}</span>
-                        {entry.apiHost && (
-                          <span className="text-[10px] text-muted block truncate">API: {entry.apiHost}</span>
-                        )}
+                        <span className="text-[11px] text-primary block truncate font-medium">
+                          {entry.name || entry.host}
+                        </span>
+                        <span className="text-[10px] text-muted block truncate">
+                          {entry.name ? entry.host : ""}
+                          {entry.name && entry.apiHost ? " · " : ""}
+                          {entry.apiHost ? `API: ${entry.apiHost}` : ""}
+                        </span>
                       </div>
                       <button
                         onClick={() => removeHost(entry.host)}

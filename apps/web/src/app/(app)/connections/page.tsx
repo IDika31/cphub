@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import Topbar from "@/components/shell/topbar";
 import Button from "@/components/ui/button";
 import Badge from "@/components/ui/badge";
 import Skeleton from "@/components/ui/skeleton";
 import Modal from "@/components/ui/modal";
-import { fetchConnections, unlinkAccount, linkTLX, type LinkedAccount } from "@/lib/api/connections";
+import { useToast } from "@/components/ui/toast";
+import { fetchConnections, unlinkAccount, linkTLX, linkTLXCustom, type LinkedAccount } from "@/lib/api/connections";
 import { apiClient, API_BASE_URL } from "@/lib/api/client";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
+import { providerLabel, PROVIDER_TLX_CUSTOM } from "@/lib/providers";
 
 interface ProviderRow {
   name: string;
@@ -27,6 +29,19 @@ export default function ConnectionsPage() {
   const [tlxLoading, setTlxLoading] = useState(false);
   const [tlxError, setTlxError] = useState("");
   const [tlxImportOpen, setTlxImportOpen] = useState(false);
+  const [customTLX, setCustomTLX] = useState<LinkedAccount[]>([]);
+  // A self-hosted Judgels instance logs in exactly like tlx.toki.id — same
+  // /session/login, same /users/me — so it gets the same form, keyed by host.
+  const [customHost, setCustomHost] = useState<string | null>(null);
+  const [customUser, setCustomUser] = useState("");
+  const [customPass, setCustomPass] = useState("");
+  const [customLoading, setCustomLoading] = useState(false);
+  const [customError, setCustomError] = useState("");
+  const customUserId = useId();
+  const customPassId = useId();
+  const { addToast } = useToast();
+  const tlxUserId = useId();
+  const tlxPassId = useId();
 
   useEffect(() => {
     loadData();
@@ -38,10 +53,11 @@ export default function ConnectionsPage() {
         try {
           const res = await apiClient<{ redirectUrl: string }>("/api/accounts/codeforces", { method: "POST" });
           window.location.href = res.redirectUrl;
-        } catch {}
+        } catch (err) {
+          addToast("error", `Gagal memulai OAuth Codeforces: ${(err as Error).message || "cek koneksi API"}`);
+        }
         break;
       }
-        break;
       case "tlx":
         setTlxModalOpen(true);
         break;
@@ -56,6 +72,9 @@ export default function ConnectionsPage() {
     try {
       const res = await fetchConnections();
       const accounts = res.data;
+      // Registered automatically by the extension via /api/sync/tlx-hosts, so
+      // they are listed rather than offered as something to "Link".
+      setCustomTLX(accounts.filter((a) => a.provider === PROVIDER_TLX_CUSTOM));
       setProviders([
         {
           name: "Codeforces",
@@ -65,7 +84,7 @@ export default function ConnectionsPage() {
           description: "Hubungkan akun Codeforces via OAuth untuk sync problem dan submission.",
         },
         {
-          name: "TLX TOKI",
+          name: "TLX TOKI (tlx.toki.id)",
           provider: "tlx",
           connected: accounts.some((a) => a.provider === "tlx" && a.isConnected),
           account: accounts.find((a) => a.provider === "tlx") || null,
@@ -79,18 +98,42 @@ export default function ConnectionsPage() {
           description: "Akun Google digunakan untuk login.",
         },
       ]);
-    } catch {
-      // keep defaults
+    } catch (err) {
+      addToast("error", `Gagal memuat connections: ${(err as Error).message || "cek koneksi API"}`);
     } finally {
       setLoading(false);
     }
   }
 
   async function handleUnlink(id: string) {
+    // Unlink drops the stored token — cheap to redo, but never silently.
+    if (!confirm("Putuskan akun ini? Sync dari provider tersebut akan berhenti sampai di-link ulang.")) return;
     try {
       await unlinkAccount(id);
+      addToast("success", "Akun diputus");
       loadData();
-    } catch {}
+    } catch (err) {
+      addToast("error", `Gagal unlink: ${(err as Error).message || "cek koneksi API"}`);
+    }
+  }
+
+  async function handleCustomSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!customHost) return;
+    setCustomLoading(true);
+    setCustomError("");
+    try {
+      const res = await linkTLXCustom(customHost, customUser, customPass);
+      addToast("success", `${res.host} terhubung sebagai ${res.username}`);
+      setCustomHost(null);
+      setCustomUser("");
+      setCustomPass("");
+      loadData();
+    } catch (err) {
+      setCustomError((err as Error).message || "Gagal login ke instance ini");
+    } finally {
+      setCustomLoading(false);
+    }
   }
 
   async function handleTLXSubmit(e: React.FormEvent) {
@@ -126,11 +169,11 @@ export default function ConnectionsPage() {
             {providers.map((p) => (
               <div
                 key={p.provider}
-                className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] p-[16px] flex items-center gap-4"
+                className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] p-[16px] flex flex-wrap items-center gap-x-4 gap-y-3"
               >
                 <div
                   className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                    p.connected ? "bg-[#10b981]" : "bg-[#52525b]"
+                    p.connected ? "bg-[#10b981]" : "bg-[#71717a]"
                   }`}
                 />
                 <div className="flex-1 min-w-0">
@@ -145,12 +188,12 @@ export default function ConnectionsPage() {
                     )}
                   </div>
                   {p.connected && p.account ? (
-                    <p className="text-[12px] text-[#71717a]">
+                    <p className="text-[12px] text-[#a1a1aa]">
                       {p.account.handle || p.account.provider}
                       {p.account.rating > 0 && ` · Rating: ${p.account.rating} (max ${p.account.maxRating})`}
                     </p>
                   ) : (
-                    <p className="text-[12px] text-[#71717a]">{p.description}</p>
+                    <p className="text-[12px] text-[#a1a1aa]">{p.description}</p>
                   )}
                 </div>
                 {p.connected && p.account ? (
@@ -177,42 +220,142 @@ export default function ConnectionsPage() {
           </div>
         )}
 
+        {!loading && (
+          <div className="max-w-[600px] mt-6">
+            <h2 className="text-[13px] font-semibold text-[#e4e4e7] mb-1">TLX Custom Instance</h2>
+            <p className="text-[12px] text-[#a1a1aa] mb-3">
+              Judgels/TLX self-hosted yang kamu tambahkan di extension muncul di sini otomatis —
+              terpisah dari TLX TOKI resmi supaya tidak tertukar. Hapus host-nya di extension untuk
+              melepas tautan.
+            </p>
+            {customTLX.length === 0 ? (
+              <p className="text-[12px] text-[#a1a1aa] bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] p-[14px]">
+                Belum ada. Tambahkan host di extension Settings, lalu buka halaman problem-nya sekali —
+                extension mendaftarkannya ke sini.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {customTLX.map((a) => (
+                  <li
+                    key={a.id}
+                    className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] p-[14px] flex flex-wrap items-center gap-x-3 gap-y-2"
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#a78bfa] flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium text-[#e4e4e7] truncate">
+                        {providerLabel(a.provider, a.handle, a.displayName)}
+                      </div>
+                      <div className="text-[11px] text-[#a1a1aa] truncate">
+                        {a.handle}
+                        {" · "}
+                        {a.isConnected && a.providerUsername
+                          ? `terhubung sebagai ${a.providerUsername}`
+                          : "belum login"}
+                        {a.providerUserId ? ` · api: ${a.providerUserId}` : ""}
+                      </div>
+                    </div>
+                    {a.isConnected && a.providerUsername ? (
+                      <div className="flex items-center gap-2">
+                        <Badge variant="verdict-ac">{a.providerUsername}</Badge>
+                        <Button variant="danger" onClick={() => handleUnlink(a.id)}>Unlink</Button>
+                      </div>
+                    ) : (
+                      <Button variant="primary" onClick={() => { setCustomHost(a.handle); setCustomError(""); }}>
+                        Login
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         <ImportTLXModal
           open={tlxImportOpen}
           onClose={() => setTlxImportOpen(false)}
         />
 
+        <Modal
+          open={customHost !== null}
+          onClose={() => { setCustomHost(null); setCustomError(""); }}
+          title={`Login ke ${customHost ?? ""}`}
+        >
+          <form onSubmit={handleCustomSubmit} className="space-y-4">
+            <p className="text-[13px] text-[#a1a1aa]">
+              Instance ini menjalankan Judgels, software yang sama dengan TLX TOKI — endpoint
+              login-nya identik, cuma domainnya beda. Pakai akun kamu di{" "}
+              <span className="text-[#e4e4e7]">{customHost}</span>.
+            </p>
+            <div className="space-y-2">
+              <label htmlFor={customUserId} className="block text-[12px] text-[#a1a1aa]">Username</label>
+              <input
+                id={customUserId}
+                type="text"
+                value={customUser}
+                onChange={(e) => setCustomUser(e.target.value)}
+                required
+                autoComplete="username"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor={customPassId} className="block text-[12px] text-[#a1a1aa]">Password</label>
+              <input
+                id={customPassId}
+                type="password"
+                value={customPass}
+                onChange={(e) => setCustomPass(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
+              />
+            </div>
+            {customError && <p role="alert" className="text-[12px] text-[#f87171]">{customError}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={() => { setCustomHost(null); setCustomError(""); }}>
+                Batal
+              </Button>
+              <Button type="submit" variant="primary" disabled={customLoading}>
+                {customLoading ? "Menghubungkan..." : "Hubungkan"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+
         <Modal open={tlxModalOpen} onClose={() => { setTlxModalOpen(false); setTlxError(""); }} title="Hubungkan TLX TOKI">
           <form onSubmit={handleTLXSubmit} className="space-y-4">
-            <p className="text-[13px] text-[#71717a]">
+            <p className="text-[13px] text-[#a1a1aa]">
               Masukkan username dan password akun TLX kamu.
             </p>
             <div className="space-y-2">
-              <label className="block text-[12px] text-[#a1a1aa]">Username</label>
+              <label htmlFor={tlxUserId} className="block text-[12px] text-[#a1a1aa]">Username</label>
               <input
+                id={tlxUserId}
                 type="text"
                 value={tlxUsername}
                 onChange={(e) => setTlxUsername(e.target.value)}
                 placeholder="username TLX"
                 required
                 autoComplete="username"
-                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#8b5cf6]"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
               />
             </div>
             <div className="space-y-2">
-              <label className="block text-[12px] text-[#a1a1aa]">Password</label>
+              <label htmlFor={tlxPassId} className="block text-[12px] text-[#a1a1aa]">Password</label>
               <input
+                id={tlxPassId}
                 type="password"
                 value={tlxPassword}
                 onChange={(e) => setTlxPassword(e.target.value)}
                 placeholder="••••••••"
                 required
                 autoComplete="current-password"
-                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#8b5cf6]"
+                className="w-full bg-[#09090b] border border-[rgba(255,255,255,0.08)] rounded-[6px] px-3 py-2 text-[13px] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6]"
               />
             </div>
             {tlxError && (
-              <p className="text-[12px] text-[#ef4444]">{tlxError}</p>
+              <p role="alert" className="text-[12px] text-[#f87171]">{tlxError}</p>
             )}
             <div className="flex justify-end gap-2 pt-1">
               <Button

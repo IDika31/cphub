@@ -61,12 +61,19 @@ Response 200: { "data": [...], "total": 0 }
 
 ---
 
-## Sync (HMAC Auth)
+## Sync (HMAC Auth, per account)
+
+Each account has its own extension secret. Get the pairing token
+(`<accountId>.<secret>`) from `GET /api/auth/hmac-secret`, or mint a new one with
+`POST /api/auth/hmac-secret/rotate` (both JWT protected).
+
+The signature is `hex(HMAC-SHA256(secret, raw request body))`.
 
 ### Sync Problem
 ```
 POST /api/sync/problem
-Header: X-HMAC-Signature: <sha256-hmac>
+Header: X-Key-Id: <account uuid>
+Header: X-HMAC-Signature: <sha256-hmac of the body>
 Header: X-Nonce: <unique-nonce>
 Body: { "provider": "codeforces", "problemId": "4A", "title": "...", ... }
 Response 200: { "status": "ok", "message": "Problem synced" }

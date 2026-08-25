@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Files } from "lucide-react";
+import { Search, Files, X } from "lucide-react";
 import Link from "next/link";
 import Topbar from "@/components/shell/topbar";
 import Badge from "@/components/ui/badge";
@@ -12,12 +12,25 @@ import { TableSkeleton } from "@/components/ui/skeleton";
 import { fetchProblems } from "@/lib/api/problems";
 import type { Problem } from "@/lib/api/types";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
+import { providerLabel, providerBadge } from "@/lib/providers";
 
 const PROVIDERS: Array<{ value: string; label: string }> = [
-  { value: "", label: "All" },
+  { value: "", label: "Semua" },
   { value: "codeforces", label: "Codeforces" },
-  { value: "tlx", label: "TLX" },
+  { value: "tlx", label: "TLX TOKI" },
+  { value: "tlx-custom", label: "TLX custom" },
 ];
+
+function parseTags(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+const TD_STATUS = "py-[10px] px-[14px] whitespace-nowrap";
 
 function ProblemsetContent() {
   const router = useRouter();
@@ -34,26 +47,59 @@ function ProblemsetContent() {
     setProvider(searchParams.get("provider") || "");
   }, [searchParams]);
 
+  // Search is debounced and sent to the server, so it covers the whole table
+  // rather than only the rows already loaded. The client-side pass afterwards is
+  // just to keep the visible list in sync while a request is in flight.
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
   useEffect(() => {
     setLoading(true);
-    fetchProblems({ provider: provider || undefined })
+    fetchProblems({ provider: provider || undefined, q: debounced || undefined })
       .then((res) => { setProblems(res.data); setTotal(res.total); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [provider]);
+  }, [provider, debounced]);
+
+  const query = search.trim().toLowerCase();
+  const visible = useMemo(() => {
+    if (!query) return problems;
+    return problems.filter((p) => {
+      const haystack = [p.title, p.problemId, ...parseTags(p.tags)]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [problems, query]);
 
   return (
     <>
       <Topbar title="Problemset">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#52525b]" />
+            <Search className="absolute left-[8px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#a1a1aa]" aria-hidden="true" />
             <input
-              className="w-[200px] h-[30px] pl-[28px] pr-[10px] rounded-[6px] text-[12px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7] focus:outline-none focus:border-[#8b5cf6] transition-colors"
-              placeholder="Search problems..."
+              type="search"
+              aria-label="Cari problem"
+              className="w-[200px] h-[30px] pl-[28px] pr-[28px] rounded-[6px] text-[12px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7] placeholder-[#a1a1aa] focus:outline-none focus:border-[#8b5cf6] transition-colors"
+              placeholder="Cari judul, id, tag..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Hapus pencarian"
+                className="absolute right-[6px] top-1/2 -translate-y-1/2 p-[2px] rounded text-[#a1a1aa] hover:text-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
           <Button variant="primary" onClick={() => setImportModalOpen(true)}>
             Import TLX
@@ -74,7 +120,7 @@ function ProblemsetContent() {
               onClick={() => { setProvider(p.value); router.push(`/problems${p.value ? `?provider=${p.value}` : ""}`); }}
               aria-pressed={provider === p.value}
               className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
-                provider === p.value ? "bg-[#8b5cf6] text-white" : "bg-[#1f1f23] text-[#a1a1aa] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
+                provider === p.value ? "bg-[#7c3aed] text-white" : "bg-[#1f1f23] text-[#a1a1aa] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
               }`}
             >
               {p.label}
@@ -84,18 +130,25 @@ function ProblemsetContent() {
 
         {loading ? (
           <TableSkeleton rows={5} cols={5} />
+        ) : visible.length === 0 && query ? (
+          <EmptyState
+            icon={<Search className="w-8 h-8" />}
+            title={`Tidak ada hasil untuk "${search.trim()}"`}
+            description="Coba kata kunci lain, atau hapus filter provider."
+            action={<Button variant="default" onClick={() => setSearch("")}>Hapus pencarian</Button>}
+          />
         ) : problems.length === 0 ? (
           <EmptyState
             icon={<Files className="w-8 h-8" />}
-            title="No problems synced yet"
-            description="Sync problems from Codeforces via extension, atau import TLX problem via tombol Import TLX."
+            title="Belum ada problem tersync"
+            description="Sync problem Codeforces lewat extension (Alt+C), atau import problem TLX lewat tombol Import TLX."
             action={<Button variant="primary" onClick={() => setImportModalOpen(true)}>Import TLX</Button>}
           />
         ) : (
           <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] overflow-x-auto">
             <table className="w-full text-[13px] min-w-[640px]">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.08)] text-[#71717a] text-[12px]">
+                <tr className="border-b border-[rgba(255,255,255,0.08)] text-[#a1a1aa] text-[12px]">
                   <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Problem</th>
                   <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Provider</th>
                   <th scope="col" className="text-left py-[10px] px-[14px] font-medium">Difficulty</th>
@@ -104,28 +157,41 @@ function ProblemsetContent() {
                 </tr>
               </thead>
               <tbody>
-                {problems.map((p) => {
-                  const tags = (() => { try { return JSON.parse(p.tags) as string[] } catch { return [] } })();
+                {visible.map((p) => {
+                  const tags = parseTags(p.tags);
                   return (
-                    <tr key={p.id} className="border-b border-[rgba(255,255,255,0.04)] hover:bg-[#1f1f23] transition-colors cursor-pointer">
+                    <tr
+                      key={p.id}
+                      onClick={() => router.push(`/problems/${p.id}`)}
+                      className="border-b border-[rgba(255,255,255,0.04)] hover:bg-[#1f1f23] transition-colors cursor-pointer"
+                    >
                       <td className="py-[10px] px-[14px]">
-                        <Link href={`/problems/${p.id}`} className="text-[#e4e4e7] hover:text-[#8b5cf6] transition-colors">
+                        <Link href={`/problems/${p.id}`} className="text-[#e4e4e7] hover:text-[#a78bfa] transition-colors">
                           {p.title}
                         </Link>
                       </td>
                       <td className="py-[10px] px-[14px]">
-                        <Badge variant={p.provider === "codeforces" ? "cf" : "difficulty"}>{p.provider}</Badge>
+                        <Badge variant={providerBadge(p.provider)}>{providerLabel(p.provider)}</Badge>
                       </td>
-                      <td className="py-[10px] px-[14px] text-[#fbbf24]">{p.difficulty}</td>
+                      <td className="py-[10px] px-[14px] text-[#fbbf24] tabular-nums">{p.difficulty > 0 ? p.difficulty : <span className="text-[#a1a1aa]">—</span>}</td>
                       <td className="py-[10px] px-[14px]">
                         <div className="flex gap-1 flex-wrap">
                           {tags.slice(0, 3).map((t: string) => (
-                            <span key={t} className="text-[11px] text-[#71717a]">{t}</span>
+                            <span key={t} className="text-[11px] text-[#a1a1aa]">{t}</span>
                           ))}
                         </div>
                       </td>
-                      <td className="py-[10px] px-[14px]">
-                        {p.status === "solved" ? <Badge variant="verdict-ac">✓</Badge> : p.status === "synced" ? <Badge variant="cf">↻</Badge> : <Badge variant="verdict-pending">○</Badge>}
+                      <td className={TD_STATUS}>
+                        {/* Status is the caller's own outcome, overlaid by the
+                            API — it used to be a shared column that read
+                            "synced" for everybody. */}
+                        {p.status === "solved" ? (
+                          <Badge variant="verdict-ac">✓ Solved</Badge>
+                        ) : p.status === "attempted" ? (
+                          <Badge variant="verdict-tle">◐ Dicoba</Badge>
+                        ) : (
+                          <Badge variant="verdict-pending">○ Belum</Badge>
+                        )}
                       </td>
                     </tr>
                   );
@@ -134,8 +200,11 @@ function ProblemsetContent() {
             </table>
           </div>
         )}
-        {total > 0 && (
-          <p className="text-[11px] text-[#52525b] mt-2 text-right">{total} problems</p>
+        {!loading && (total > 0 || query) && (
+          <p className="text-[11px] text-[#a1a1aa] mt-2 text-right" aria-live="polite">
+            {query ? `${total} hasil untuk "${search.trim()}"` : `${total} problem`}
+            {provider ? ` · ${PROVIDERS.find((p) => p.value === provider)?.label ?? provider}` : ""}
+          </p>
         )}
       </div>
     </>
@@ -144,7 +213,7 @@ function ProblemsetContent() {
 
 export default function ProblemsetPage() {
   return (
-    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[14px] text-[#52525b] animate-pulse">Loading...</div>}>
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[14px] text-[#a1a1aa] animate-pulse">Loading...</div>}>
       <ProblemsetContent />
     </Suspense>
   );

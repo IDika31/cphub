@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiClient, API_BASE_URL } from "@/lib/api/client";
 
 interface User {
   id: string;
@@ -31,7 +32,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ isLoading: false });
         return;
       }
-      const res = await fetch("http://localhost:3001/api/auth/me", {
+      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -49,16 +50,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (email: string, password: string) => {
     set({ isLoading: true });
     try {
-      const res = await fetch("http://localhost:3001/api/auth/login", {
+      const data = await apiClient<{ accessToken: string; user: User }>("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error((err as { error?: string }).error || "Login failed");
-      }
-      const data = await res.json();
       localStorage.setItem("cphub_token", data.accessToken);
       set({ user: data.user, isAuthenticated: true, isLoading: false });
     } catch (err) {
@@ -70,16 +65,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   register: async (name: string, email: string, password: string) => {
     set({ isLoading: true });
     try {
-      const res = await fetch("http://localhost:3001/api/auth/register", {
+      const data = await apiClient<{ accessToken: string; user: User }>("/api/auth/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password }),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error((err as { error?: string }).error || "Register failed");
-      }
-      const data = await res.json();
       localStorage.setItem("cphub_token", data.accessToken);
       set({ user: data.user, isAuthenticated: true, isLoading: false });
     } catch (err) {
@@ -89,7 +78,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   loginWithGoogle: () => {
-    window.location.href = "http://localhost:3001/api/auth/google";
+    window.location.href = `${API_BASE_URL}/api/auth/google`;
   },
 
   logout: () => {

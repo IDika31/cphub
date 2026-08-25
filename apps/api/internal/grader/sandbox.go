@@ -1,3 +1,5 @@
+//go:build !windows
+
 package grader
 
 import (
@@ -9,12 +11,12 @@ import (
 // CheckFirejail verifies firejail is installed and functional
 func CheckFirejail() error {
 	// Check binary exists
-	if _, err := os.Stat("/usr/bin/firejail"); os.IsNotExist(err) {
+	if _, err := os.Stat(firejailPath); os.IsNotExist(err) {
 		return fmt.Errorf("GRADER_SANDBOX_UNAVAILABLE: firejail not found at /usr/bin/firejail")
 	}
 
 	// Check suid bit
-	info, err := os.Stat("/usr/bin/firejail")
+	info, err := os.Stat(firejailPath)
 	if err != nil {
 		return fmt.Errorf("GRADER_SANDBOX_UNAVAILABLE: cannot stat firejail: %w", err)
 	}

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -29,6 +28,7 @@ type RunRequest struct {
 	SourceCode     string            `json:"sourceCode"`
 	TestCases      []grader.TestCase `json:"testCases"`
 	TimeoutSeconds int               `json:"timeoutSeconds"`
+	TimeLimitMS    int               `json:"timeLimitMs"`
 	MemoryLimitMB  int               `json:"memoryLimitMB"`
 	ProblemID      string            `json:"problemId"`
 }
@@ -80,10 +80,10 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 	compileErr, err := grader.Compile(context.Background(), lang, td)
 	if err != nil {
 		return c.JSON(grader.GraderResult{
-			Verdict:       grader.VerdictCE,
-			TotalTests:    len(req.TestCases),
-			CompileError:  compileErr,
-			Results:       make([]grader.TestResult, 0),
+			Verdict:      grader.VerdictCE,
+			TotalTests:   len(req.TestCases),
+			CompileError: compileErr,
+			Results:      make([]grader.TestResult, 0),
 		})
 	}
 
@@ -94,16 +94,15 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 	if req.MemoryLimitMB > 0 {
 		memLimitMB = req.MemoryLimitMB
 	}
-	for i, tc := range req.TestCases {
-		timeout := h.cfg.TimeoutSeconds
-		if req.TimeoutSeconds > 0 {
-			timeout = req.TimeoutSeconds
-		}
-		ctx, cancel := context.WithTimeout(context.Background(),
-			time.Duration(timeout)*time.Second)
-		defer cancel()
+	opts := grader.RunOptions{
+		TimeLimitMS:   h.resolveTimeLimitMS(&req),
+		MemoryLimitMB: memLimitMB,
+		MaxOutputKB:   h.cfg.MaxOutputKB,
+		Profile:       h.cfg.FirejailProfile,
+	}
 
-		execResult, err := grader.RunFirejail(ctx, lang, td, tc.Input, h.cfg.FirejailProfile, memLimitMB)
+	for i, tc := range req.TestCases {
+		execResult, err := grader.RunSandboxed(context.Background(), lang, td, tc.Input, opts)
 		if err != nil {
 			results = append(results, grader.TestResult{
 				Index:   i,
@@ -127,6 +126,7 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 			Index:    i,
 			Verdict:  verdict,
 			Runtime:  execResult.Runtime,
+			Memory:   execResult.Memory,
 			Input:    tc.Input,
 			Expected: tc.Output,
 			Output:   execResult.Stdout,
@@ -143,9 +143,13 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 	}
 
 	var maxRuntime int64
+	var maxMemory int64
 	for _, r := range results {
 		if r.Runtime > maxRuntime {
 			maxRuntime = r.Runtime
+		}
+		if r.Memory > maxMemory {
+			maxMemory = r.Memory
 		}
 	}
 
@@ -153,20 +157,21 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 
 	// Persist the run as a local submission and update problem solved status.
 	// Works for any provider (codeforces, tlx) since it keys off the problem row.
-	h.persistRun(c, &req, aggregate, results, passedTests, maxRuntime)
+	h.persistRun(c, &req, aggregate, results, passedTests, maxRuntime, maxMemory)
 
 	return c.JSON(grader.GraderResult{
 		Verdict:     aggregate,
 		TotalTests:  len(req.TestCases),
 		PassedTests: passedTests,
 		MaxRuntime:  maxRuntime,
+		MaxMemory:   maxMemory,
 		Results:     results,
 	})
 }
 
 // persistRun records the grader run as a LocalSubmission and, on full AC,
 // marks the problem solved. Best-effort: failures are logged, never block the response.
-func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader.Verdict, results []grader.TestResult, passed int, maxRuntime int64) {
+func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader.Verdict, results []grader.TestResult, passed int, maxRuntime, maxMemory int64) {
 	if h.db == nil || req.ProblemID == "" {
 		return
 	}
@@ -198,6 +203,7 @@ func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader
 		SourceCode:  req.SourceCode,
 		Verdict:     string(verdict),
 		Runtime:     int(maxRuntime),
+		Memory:      int(maxMemory),
 		PassedTests: passed,
 		TotalTests:  len(req.TestCases),
 		ExecutedAt:  time.Now(),
@@ -215,6 +221,30 @@ func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader
 	}
 }
 
+// resolveTimeLimitMS picks the per-testcase limit in milliseconds: explicit ms
+// from the client, legacy whole seconds, or the server default. Clamped because
+// the value arrives in a request body.
+func (h *GraderHandler) resolveTimeLimitMS(req *RunRequest) int {
+	ms := req.TimeLimitMS
+	if ms <= 0 {
+		ms = req.TimeoutSeconds * 1000
+	}
+	if ms <= 0 {
+		ms = h.cfg.TimeoutSeconds * 1000
+	}
+	limit := h.cfg.MaxTimeLimitMS
+	if limit <= 0 {
+		limit = 15000
+	}
+	if ms > limit {
+		ms = limit
+	}
+	if ms < 100 {
+		ms = 100
+	}
+	return ms
+}
+
 func (h *GraderHandler) Status(c *fiber.Ctx) error {
 	active, max := h.queue.Status()
 	compilers := grader.CheckCompilers()
@@ -229,6 +259,3 @@ func (h *GraderHandler) Status(c *fiber.Ctx) error {
 		"firejail":  grader.CheckFirejail() == nil,
 	})
 }
-
-// Simple stub to avoid import issues
-var _ = fmt.Sprintf

@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -12,15 +14,14 @@ import (
 )
 
 type Config struct {
-	DB        DBConfig
-	Redis     RedisConfig
-	Server    ServerConfig
-	JWT       JWTConfig
-	Google    OAuthConfig
-	CF        OAuthConfig
-	Extension ExtensionConfig
-	Grader    GraderConfig
-	Log       LogConfig
+	DB     DBConfig
+	Redis  RedisConfig
+	Server ServerConfig
+	JWT    JWTConfig
+	Google OAuthConfig
+	CF     OAuthConfig
+	Grader GraderConfig
+	Log    LogConfig
 }
 
 type DBConfig struct {
@@ -55,6 +56,11 @@ type ServerConfig struct {
 	Port    string
 	Host    string
 	BaseURL string
+	// WebBaseURL is where OAuth callbacks send the browser back to, and
+	// CORSOrigins is the allowlist the API answers with. Both are per-deployment:
+	// hardcoding localhost broke every non-local install.
+	WebBaseURL  string
+	CORSOrigins string
 }
 
 type JWTConfig struct {
@@ -69,27 +75,26 @@ type OAuthConfig struct {
 	RedirectURL  string
 }
 
-type ExtensionConfig struct {
-	HMACSecret string
-}
-
 type GraderConfig struct {
-	MaxConcurrent    int
-	TimeoutSeconds   int
-	MemoryLimitMB    int
-	MaxOutputKB      int
-	MaxCodeSizeKB    int
-	TempDir          string
-	FirejailProfile  string
-	CompilerPaths    CompilerPaths
+	MaxConcurrent     int
+	TimeoutSeconds    int
+	MemoryLimitMB     int
+	MaxOutputKB       int
+	TimeGraceMS       int
+	SandboxOverheadMS int
+	MaxTimeLimitMS    int
+	MaxCodeSizeKB     int
+	TempDir           string
+	FirejailProfile   string
+	CompilerPaths     CompilerPaths
 }
 
 type CompilerPaths struct {
-	GCC     string
-	Python3 string
-	Node    string
-	Javac   string
-	Java    string
+	GCC      string
+	Python3  string
+	Node     string
+	Javac    string
+	Java     string
 	Firejail string
 }
 
@@ -134,9 +139,11 @@ func Load() *Config {
 			DB:       getEnvInt("REDIS_DB", 0),
 		},
 		Server: ServerConfig{
-			Port:    getEnv("API_PORT", "3001"),
-			Host:    getEnv("API_HOST", "0.0.0.0"),
-			BaseURL: getEnv("API_BASE_URL", "http://localhost:3001"),
+			Port:        getEnv("API_PORT", "3001"),
+			Host:        getEnv("API_HOST", "0.0.0.0"),
+			BaseURL:     getEnv("API_BASE_URL", "http://localhost:3001"),
+			WebBaseURL:  getEnv("WEB_BASE_URL", "http://localhost:3000"),
+			CORSOrigins: getEnv("CORS_ORIGINS", "http://localhost:3000"),
 		},
 		JWT: JWTConfig{
 			Secret:        getEnv("JWT_SECRET", "change-me"),
@@ -153,25 +160,18 @@ func Load() *Config {
 			ClientSecret: getEnv("CF_CLIENT_SECRET", ""),
 			RedirectURL:  getEnv("CF_REDIRECT_URL", ""),
 		},
-		Extension: ExtensionConfig{
-			HMACSecret: getEnv("EXTENSION_HMAC_SECRET", "change-me"),
-		},
 		Grader: GraderConfig{
-			MaxConcurrent:   getEnvInt("GRADER_MAX_CONCURRENT", 5),
-			TimeoutSeconds:  getEnvInt("GRADER_TIMEOUT_SECONDS", 5),
-			MemoryLimitMB:   getEnvInt("GRADER_MEMORY_LIMIT_MB", 512),
-			MaxOutputKB:     getEnvInt("GRADER_MAX_OUTPUT_KB", 10),
-			MaxCodeSizeKB:   getEnvInt("GRADER_MAX_CODE_SIZE_KB", 256),
-			TempDir:         getEnv("GRADER_TEMP_DIR", "/tmp/cphub-grader"),
-			FirejailProfile: getEnv("GRADER_FIREJAIL_PROFILE", "/etc/firejail/cphub.local"),
-			CompilerPaths: CompilerPaths{
-				GCC:      getEnv("GCC_PATH", "/usr/bin/g++"),
-				Python3:  getEnv("PYTHON3_PATH", "/usr/bin/python3"),
-				Node:     getEnv("NODE_PATH", "/usr/bin/node"),
-				Javac:    getEnv("JAVAC_PATH", "/usr/bin/javac"),
-				Java:     getEnv("JAVA_PATH", "/usr/bin/java"),
-				Firejail: getEnv("FIREJAIL_PATH", "/usr/bin/firejail"),
-			},
+			MaxConcurrent:     getEnvInt("GRADER_MAX_CONCURRENT", 5),
+			TimeoutSeconds:    getEnvInt("GRADER_TIMEOUT_SECONDS", 5),
+			MemoryLimitMB:     getEnvInt("GRADER_MEMORY_LIMIT_MB", 512),
+			MaxOutputKB:       getEnvInt("GRADER_MAX_OUTPUT_KB", 256),
+			TimeGraceMS:       getEnvInt("GRADER_TIME_GRACE_MS", 500),
+			SandboxOverheadMS: getEnvInt("GRADER_SANDBOX_OVERHEAD_MS", 0),
+			MaxTimeLimitMS:    getEnvInt("GRADER_MAX_TIME_LIMIT_MS", 15000),
+			MaxCodeSizeKB:     getEnvInt("GRADER_MAX_CODE_SIZE_KB", 256),
+			TempDir:           getEnv("GRADER_TEMP_DIR", defaultTempDir()),
+			FirejailProfile:   sanitizeFirejailProfile(getEnv("GRADER_FIREJAIL_PROFILE", "")),
+			CompilerPaths:     defaultCompilerPaths(),
 		},
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "debug"),
@@ -201,4 +201,51 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 		return defaultVal
 	}
 	return d
+}
+
+func defaultTempDir() string {
+	return filepath.Join(os.TempDir(), "cphub-grader")
+}
+
+// sanitizeFirejailProfile drops a profile that carries a `timeout` directive.
+// firejail holds the sandbox open for that whole duration even after the payload
+// exits, so such a profile turns every run into a TLE. The grader passes its
+// hardening flags explicitly, so no profile is needed at all.
+func sanitizeFirejailProfile(path string) string {
+	if path == "" || runtime.GOOS == "windows" {
+		return ""
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("[config] firejail profile %s unreadable (%v) — using built-in hardening", path, err)
+		return ""
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "timeout") {
+			log.Printf("[config] IGNORING firejail profile %s: it sets `timeout`, which makes every run report TLE", path)
+			return ""
+		}
+	}
+	return path
+}
+
+func defaultCompilerPaths() CompilerPaths {
+	if runtime.GOOS == "windows" {
+		return CompilerPaths{
+			GCC:      getEnv("GCC_PATH", "g++"),
+			Python3:  getEnv("PYTHON3_PATH", "python"),
+			Node:     getEnv("NODE_PATH", "node"),
+			Javac:    getEnv("JAVAC_PATH", "javac"),
+			Java:     getEnv("JAVA_PATH", "java"),
+			Firejail: "",
+		}
+	}
+	return CompilerPaths{
+		GCC:      getEnv("GCC_PATH", "/usr/bin/g++"),
+		Python3:  getEnv("PYTHON3_PATH", "/usr/bin/python3"),
+		Node:     getEnv("NODE_PATH", "/usr/bin/node"),
+		Javac:    getEnv("JAVAC_PATH", "/usr/bin/javac"),
+		Java:     getEnv("JAVA_PATH", "/usr/bin/java"),
+		Firejail: getEnv("FIREJAIL_PATH", "/usr/bin/firejail"),
+	}
 }

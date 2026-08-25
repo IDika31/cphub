@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "CPHub — Competitive Programming Hub",
-  "version": "4.0.0",
-  "description": "Sync Codeforces & TLX TOKI problems to CPHub local dashboard",
+  "name": "CPHub \u2014 Competitive Programming Hub",
+  "version": "4.2.0",
+  "description": "Sync Codeforces & TLX TOKI problems to your CPHub dashboard. Alt+C opens the current problem in the editor.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "public/icons/icon-16.png",
     "48": "public/icons/icon-48.png",
-    "128": "public/icons/icon-128.png"
+    "128": "public/icons/icon-128.png",
+    "512": "public/icons/icon-512.png"
   },
   "action": {
     "default_popup": "src/popup/index.html",
@@ -31,16 +32,22 @@
         "https://codeforces.com/contest/*/status/*",
         "https://codeforces.com/profile/*"
       ],
-      "js": ["src/content/codeforces.ts"],
+      "js": [
+        "src/content/codeforces.ts"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://tlx.toki.id/problems/*",
+        "https://tlx.toki.id/contests/*",
+        "https://tlx.toki.id/courses/*",
         "https://tlx.toki.id/submissions/*",
         "https://tlx.toki.id/profiles/*"
       ],
-      "js": ["src/content/tlx.ts"],
+      "js": [
+        "src/content/tlx.ts"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -48,12 +55,17 @@
     "storage",
     "alarms",
     "notifications",
-    "contextMenus"
+    "contextMenus",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://codeforces.com/*",
     "https://tlx.toki.id/*",
-    "http://localhost:3001/*"
+    "http://localhost:3001/*",
+    "http://localhost:3000/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "commands": {
     "sync-current-problem": {

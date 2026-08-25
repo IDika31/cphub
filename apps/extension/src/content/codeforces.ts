@@ -1,4 +1,5 @@
 import { MESSAGE_TYPES } from "../shared/messages";
+import { registerOpenEditorHotkey } from "../shared/hotkey";
 import { detectPageType } from "./detector";
 import { logger } from "../shared/logger";
 
@@ -56,33 +57,33 @@ function scrapeProblem(): Record<string, unknown> | null {
       latexExpressions[key] = tex;
     });
 
-    // Sample test cases — preserve exact text with newlines
+    // Sample test cases. CF renders one .input/.output pair per Example block,
+    // so a problem with 3 examples has 3 pairs — querySelector (singular) used
+    // to grab only the first and silently drop the rest.
+    //
+    // Multi-test problems ("t test cases") are a different shape: ONE pair whose
+    // <pre> wraps each line in <div class="test-example-line">. That is a single
+    // stdin, and getRawText already turns those divs into newlines, so it needs
+    // no special case — the old branch here built a testcase with output ===
+    // input, which could never pass.
     const sampleTestDiv = container.querySelector(".sample-tests");
     const testCases: Array<{ input: string; output: string; isSample: boolean }> = [];
     if (sampleTestDiv) {
-      const inputPre = sampleTestDiv.querySelector(".input pre");
-      const outputPre = sampleTestDiv.querySelector(".output pre");
+      const inputPres = Array.from(sampleTestDiv.querySelectorAll(".input pre"));
+      const outputPres = Array.from(sampleTestDiv.querySelectorAll(".output pre"));
+      const pairs = Math.min(inputPres.length, outputPres.length);
 
-      if (inputPre && outputPre) {
-        // Get raw text — preserve newlines from <div> elements
-        const inputText = getRawText(inputPre);
-        const outputText = getRawText(outputPre);
-        testCases.push({ input: inputText, output: outputText, isSample: true });
+      for (let i = 0; i < pairs; i++) {
+        const input = getRawText(inputPres[i]);
+        const output = getRawText(outputPres[i]);
+        if (input === "" && output === "") continue;
+        testCases.push({ input, output, isSample: true });
       }
 
-      // Individual test example lines
-      const testLines = sampleTestDiv.querySelectorAll(".test-example-line");
-      if (testLines.length > 0) {
-        const lines = Array.from(testLines).map((el) => el.textContent?.trim() || "");
-        // Group lines into test cases based on the problem
-        // For now, create one test case with all lines
-        if (testCases.length === 0) {
-          testCases.push({
-            input: lines.join("\n"),
-            output: lines.join("\n"),
-            isSample: true,
-          });
-        }
+      if (inputPres.length !== outputPres.length) {
+        logger.warn(
+          `CF sample mismatch: ${inputPres.length} inputs vs ${outputPres.length} outputs, imported ${pairs}`,
+        );
       }
     }
 
@@ -204,3 +205,5 @@ let lastSyncedUrl = "";
     }, 1500);
   }
 })();
+
+registerOpenEditorHotkey();

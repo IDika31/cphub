@@ -6,9 +6,9 @@ const styles: Record<Variant, string> = {
   default:
     "bg-[#1f1f23] border border-[rgba(255,255,255,0.16)] text-[#e4e4e7] hover:bg-[#18181b]",
   primary:
-    "bg-[#8b5cf6] text-white hover:bg-[#7c3aed]",
+    "bg-[#7c3aed] text-white hover:bg-[#6d28d9]",
   ghost:
-    "bg-transparent border-transparent text-[#71717a] hover:bg-[#1f1f23] hover:text-[#e4e4e7] px-[8px] py-[4px]",
+    "bg-transparent border-transparent text-[#a1a1aa] hover:bg-[#1f1f23] hover:text-[#e4e4e7] px-[8px] py-[4px]",
   danger:
     "bg-[rgba(239,68,68,0.1)] text-[#ef4444] border border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.18)]",
 };

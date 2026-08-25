@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { Code2, BarChart3, Puzzle, Zap, Shield } from "lucide-react";
+import RedirectIfAuthed from "@/components/auth/redirect-if-authed";
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-[#0f0f10] text-[#e4e4e7]">
+      {/* A signed-in visitor has no use for the marketing page. */}
+      <RedirectIfAuthed to="/dashboard" />
       {/* Nav */}
-      <nav className="h-[56px] border-b border-[rgba(255,255,255,0.08)] flex items-center justify-between px-[24px] bg-[#18181b]/50 backdrop-blur">
-        <span className="text-[18px] font-semibold text-[#8b5cf6]">CPHub</span>
+      <nav className="h-[56px] border-b border-[rgba(255,255,255,0.08)] flex items-center justify-between px-[16px] sm:px-[24px] bg-[#18181b]/50 backdrop-blur">
+        <span className="text-[18px] font-semibold text-[#a78bfa]">CPHub</span>
         <div className="flex items-center gap-3">
           <Link
             href="/login"
@@ -16,7 +19,7 @@ export default function LandingPage() {
           </Link>
           <Link
             href="/register"
-            className="px-[14px] py-[6px] rounded-[6px] text-[13px] font-medium bg-[#8b5cf6] text-white hover:bg-[#7c3aed] transition-colors"
+            className="px-[14px] py-[6px] rounded-[6px] text-[13px] font-medium bg-[#7c3aed] text-white hover:bg-[#6d28d9] transition-colors"
           >
             Register
           </Link>
@@ -24,23 +27,23 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section className="max-w-[900px] mx-auto pt-[100px] pb-[80px] px-[24px] text-center">
-        <div className="inline-flex items-center gap-2 px-[10px] py-[4px] rounded-full text-[11px] font-medium bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] mb-6 border border-[rgba(139,92,246,0.2)]">
-          <Zap className="w-3 h-3" /> v4.0 — Local-first
+      <section className="max-w-[900px] mx-auto pt-[64px] sm:pt-[100px] pb-[64px] sm:pb-[80px] px-[24px] text-center">
+        <div className="inline-flex items-center gap-2 px-[10px] py-[4px] rounded-full text-[11px] font-medium bg-[rgba(139,92,246,0.15)] text-[#a78bfa] mb-6 border border-[rgba(139,92,246,0.2)]">
+          <Zap className="w-3 h-3" aria-hidden="true" /> v4.0 — Local-first
         </div>
-        <h1 className="text-[44px] font-bold leading-tight mb-4">
+        <h1 className="text-[32px] sm:text-[44px] font-bold leading-tight mb-4">
           Competitive Programming{" "}
-          <span className="text-[#8b5cf6]">Hub</span>
+          <span className="text-[#a78bfa]">Hub</span>
         </h1>
-        <p className="text-[16px] text-[#71717a] max-w-[600px] mx-auto mb-8 leading-relaxed">
+        <p className="text-[15px] sm:text-[16px] text-[#a1a1aa] max-w-[600px] mx-auto mb-8 leading-relaxed">
           Satu platform untuk semua workflow competitive programming.
           Codeforces, TLX TOKI, editor Monaco, grader native, dan analitik
           — semua berjalan lokal di mesinmu.
         </p>
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/register"
-            className="px-[20px] py-[10px] rounded-[8px] text-[14px] font-semibold bg-[#8b5cf6] text-white hover:bg-[#7c3aed] transition-colors"
+            className="px-[20px] py-[10px] rounded-[8px] text-[14px] font-semibold bg-[#7c3aed] text-white hover:bg-[#6d28d9] transition-colors"
           >
             Mulai Sekarang
           </Link>
@@ -55,7 +58,7 @@ export default function LandingPage() {
 
       {/* Features Grid */}
       <section className="max-w-[900px] mx-auto px-[24px] pb-[80px]">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[
             {
               icon: Code2,
@@ -92,13 +95,13 @@ export default function LandingPage() {
               key={i}
               className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[10px] p-[20px] hover:border-[rgba(139,92,246,0.3)] transition-colors"
             >
-              <div className="w-9 h-9 rounded-[8px] bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] flex items-center justify-center mb-3">
+              <div className="w-9 h-9 rounded-[8px] bg-[rgba(139,92,246,0.15)] text-[#a78bfa] flex items-center justify-center mb-3">
                 <f.icon className="w-[18px] h-[18px]" />
               </div>
               <h3 className="text-[14px] font-semibold text-[#e4e4e7] mb-1.5">
                 {f.title}
               </h3>
-              <p className="text-[12px] text-[#71717a] leading-relaxed">
+              <p className="text-[12px] text-[#a1a1aa] leading-relaxed">
                 {f.desc}
               </p>
             </div>
@@ -128,7 +131,7 @@ export default function LandingPage() {
           ].map((t) => (
             <span
               key={t}
-              className="px-[12px] py-[5px] rounded-full text-[12px] font-medium bg-[#1f1f23] text-[#71717a] border border-[rgba(255,255,255,0.08)]"
+              className="px-[12px] py-[5px] rounded-full text-[12px] font-medium bg-[#1f1f23] text-[#a1a1aa] border border-[rgba(255,255,255,0.08)]"
             >
               {t}
             </span>
@@ -138,7 +141,7 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="border-t border-[rgba(255,255,255,0.08)] py-[20px] text-center">
-        <p className="text-[12px] text-[#52525b]">
+        <p className="text-[12px] text-[#a1a1aa]">
           CPHub V4 · Andika Pratama · Universitas Sam Ratulangi
         </p>
       </footer>

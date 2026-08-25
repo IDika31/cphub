@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/IDika31/cphub/api/internal/provider/codeforces"
 	"github.com/IDika31/cphub/api/internal/repository"
 	"github.com/gofiber/fiber/v2"
@@ -56,12 +58,50 @@ func (h *ProblemHandler) List(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch problems"})
 	}
 
+	// problems.status is a shared column on a shared library, so it said "synced"
+	// for everyone and the Status column could never show a solve. Overlay the
+	// caller's own outcome instead — the response is per-request, nothing is
+	// written back.
+	if userIDStr, ok := c.Locals("userId").(string); ok {
+		if userID, e := uuid.Parse(userIDStr); e == nil {
+			h.applyUserStatus(userID, problems)
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"data":  problems,
 		"total": total,
 		"page":  page,
 		"limit": limit,
 	})
+}
+
+// applyUserStatus rewrites Status to solved / attempted / synced from the
+// caller's submissions, in one query for the whole page.
+func (h *ProblemHandler) applyUserStatus(userID uuid.UUID, problems []model.Problem) {
+	if len(problems) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(problems))
+	refs := make([]string, 0, len(problems))
+	for _, p := range problems {
+		ids = append(ids, p.ID)
+		refs = append(refs, p.ProblemID)
+	}
+
+	solved, attempted, err := h.repo.UserProblemStatus(userID, ids, refs)
+	if err != nil {
+		return
+	}
+	for i := range problems {
+		key := problems[i].Provider + "/" + problems[i].ProblemID
+		switch {
+		case solved[key] || solved[problems[i].ID.String()]:
+			problems[i].Status = "solved"
+		case attempted[key] || attempted[problems[i].ID.String()]:
+			problems[i].Status = "attempted"
+		}
+	}
 }
 
 func (h *ProblemHandler) GetByID(c *fiber.Ctx) error {
@@ -119,7 +159,9 @@ func (h *ProblemHandler) GetByProblemID(c *fiber.Ctx) error {
 		if problem.Provider == "codeforces" && (len(problem.TestCases) == 0 || problem.Statement == "") && h.cfScraper != nil {
 			if m := cfProblemIDRe.FindStringSubmatch(problemID); m != nil {
 				if p, fetchErr := h.cfScraper.FetchProblem(m[1], strings.ToUpper(m[2])); fetchErr == nil {
-					_ = h.repo.Upsert(p)
+					if upErr := h.repo.Upsert(p); upErr != nil {
+						log.Printf("[problem] re-scrape upsert failed for %s: %v", problemID, upErr)
+					}
 					if fresh, e := h.repo.FindByProblemID(problemID); e == nil {
 						return c.JSON(fresh)
 					}
@@ -136,12 +178,18 @@ func (h *ProblemHandler) GetByProblemID(c *fiber.Ctx) error {
 			letter := strings.ToUpper(m[2])
 			p, fetchErr := h.cfScraper.FetchProblem(contestID, letter)
 			if fetchErr == nil {
-				_ = h.repo.Upsert(p)
+				// Swallowing this error is what hid a missing column for days: the
+				// editor rendered the scraped problem straight from memory while
+				// every write failed, so the Problemset stayed empty.
+				if upErr := h.repo.Upsert(p); upErr != nil {
+					log.Printf("[problem] lazy-import upsert failed for %s: %v", problemID, upErr)
+				}
 				if fresh, e := h.repo.FindByProblemID(p.ProblemID); e == nil {
 					return c.JSON(fresh)
 				}
 				return c.JSON(p)
 			}
+			log.Printf("[problem] lazy-import scrape failed for %s: %v", problemID, fetchErr)
 		}
 	}
 

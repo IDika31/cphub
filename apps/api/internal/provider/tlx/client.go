@@ -6,22 +6,79 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
-const apiBase = "https://api.tlx.toki.id/v2"
-const loginURL = "https://api.tlx.toki.id/api/v2/session/login"
+// Judgels (the software behind TLX) puts every route under one configurable
+// apiUrl — judgels-client builds them all as `${APP_CONFIG.apiUrl}/<resource>`.
+// A self-hosted instance therefore differs from tlx.toki.id ONLY in this base,
+// so the client takes it as a field instead of hardcoding one host.
+const officialAPIBase = "https://api.tlx.toki.id/v2"
+
+// officialLoginBase is tlx.toki.id's quirk: its session endpoint sits under
+// /api/v2 while everything else is /v2. A stock Judgels deploy uses /v2 for both.
+const officialLoginURL = "https://api.tlx.toki.id/api/v2/session/login"
 
 type Client struct {
 	httpClient *http.Client
+	apiBase    string
+	loginURL   string
+	// official marks tlx.toki.id, which carries TLX-only endpoints (notably
+	// /stats/users) that a plain Judgels instance in JUDGELS mode does not serve.
+	official bool
 }
 
 func NewClient() *Client {
-	return &Client{httpClient: &http.Client{Timeout: 10 * time.Second}}
+	return &Client{
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+		apiBase:    officialAPIBase,
+		loginURL:   officialLoginURL,
+		official:   true,
+	}
+}
+
+// NewClientFor targets a self-hosted Judgels/TLX instance. Accepts a bare host
+// ("api.cpc.example.id"), an origin, or a full base including /v2.
+func NewClientFor(apiHost string) *Client {
+	base := normalizeAPIBase(apiHost)
+	if base == officialAPIBase {
+		return NewClient()
+	}
+	return &Client{
+		httpClient: &http.Client{Timeout: 15 * time.Second},
+		apiBase:    base,
+		loginURL:   base + "/session/login",
+		official:   false,
+	}
+}
+
+// IsOfficial reports whether this client talks to tlx.toki.id.
+func (c *Client) IsOfficial() bool { return c.official }
+
+// APIBase is exposed for logging, so a failure names the instance it came from.
+func (c *Client) APIBase() string { return c.apiBase }
+
+func normalizeAPIBase(raw string) string {
+	base := strings.TrimSpace(raw)
+	if base == "" {
+		return officialAPIBase
+	}
+	if !strings.Contains(base, "://") {
+		base = "https://" + base
+	}
+	base = strings.TrimRight(base, "/")
+	// Judgels serves its REST API under /v2; accept a base with or without it.
+	if !strings.HasSuffix(base, "/v2") {
+		base += "/v2"
+	}
+	return base
 }
 
 type UserInfo struct {
 	Username string
+	JID      string
 }
 
 type LoginResult struct {
@@ -57,7 +114,7 @@ func (w *Worksheet) MemoryLimit() string {
 }
 
 func (c *Client) get(path, token string, out interface{}) error {
-	req, err := http.NewRequest("GET", apiBase+path, nil)
+	req, err := http.NewRequest("GET", c.apiBase+path, nil)
 	if err != nil {
 		return err
 	}
@@ -82,7 +139,7 @@ func (c *Client) Login(usernameOrEmail, password string) (*LoginResult, error) {
 		"usernameOrEmail": usernameOrEmail,
 		"password":        password,
 	})
-	req, err := http.NewRequest("POST", loginURL, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.loginURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +182,7 @@ func (c *Client) Login(usernameOrEmail, password string) (*LoginResult, error) {
 func (c *Client) VerifyToken(token string) (*UserInfo, error) {
 	var result struct {
 		Username string `json:"username"`
+		JID      string `json:"jid"`
 	}
 	if err := c.get("/users/me", token, &result); err != nil {
 		return nil, err
@@ -132,7 +190,32 @@ func (c *Client) VerifyToken(token string) (*UserInfo, error) {
 	if result.Username == "" {
 		return nil, fmt.Errorf("no username in TLX users/me response")
 	}
-	return &UserInfo{Username: result.Username}, nil
+	return &UserInfo{Username: result.Username, JID: result.JID}, nil
+}
+
+// ProfileBasic is the public profile behind /profiles/{jid}/basic. TLX does have
+// a rating — the dashboard used to claim it did not and substituted a solved
+// curve, which was simply wrong.
+type ProfileBasic struct {
+	Username string `json:"username"`
+	Name     string `json:"name"`
+	Country  string `json:"country"`
+	Rating   struct {
+		PublicRating int `json:"publicRating"`
+		HiddenRating int `json:"hiddenRating"`
+	} `json:"rating"`
+}
+
+// GetProfileBasic reads a user's public profile. No token required.
+func (c *Client) GetProfileBasic(jid string) (*ProfileBasic, error) {
+	if jid == "" {
+		return nil, fmt.Errorf("empty TLX user jid")
+	}
+	var out ProfileBasic
+	if err := c.get("/profiles/"+jid+"/basic", "", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetProblemSetBySlug resolves a problemset slug to its JID and display name.
@@ -217,7 +300,7 @@ func (c *Client) Submit(containerJid, problemJid, language, sourceCode, token st
 	}
 	w.Close()
 
-	req, err := http.NewRequest("POST", apiBase+"/submissions/programming", &buf)
+	req, err := http.NewRequest("POST", c.apiBase+"/submissions/programming", &buf)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +332,7 @@ func (c *Client) post(path string, body interface{}, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest("POST", apiBase+path, bytes.NewReader(data))
+	req, err := http.NewRequest("POST", c.apiBase+path, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -279,24 +362,29 @@ func (c *Client) UsernameToJID(usernames []string) (map[string]string, error) {
 type TLXSubmissionPage struct {
 	Data struct {
 		Page []TLXSubmissionEntry `json:"page"`
-		HasNextPage bool `json:"hasNextPage"`
+		// TLX paginates backwards with a beforeId cursor: a request with no
+		// cursor returns the NEWEST page, so hasNextPage is false there and
+		// hasPreviousPage is what says "older submissions exist". Keying the
+		// loop off hasNextPage stopped it after a single page of 20.
+		HasNextPage     bool `json:"hasNextPage"`
+		HasPreviousPage bool `json:"hasPreviousPage"`
 	} `json:"data"`
-	ProblemNamesMap    map[string]string   `json:"problemNamesMap"`
-	ProblemAliasesMap  map[string]string   `json:"problemAliasesMap"`
-	ContainerNamesMap  map[string]string   `json:"containerNamesMap"`
-	ContainerPathsMap  map[string][]string `json:"containerPathsMap"`
+	ProblemNamesMap   map[string]string   `json:"problemNamesMap"`
+	ProblemAliasesMap map[string]string   `json:"problemAliasesMap"`
+	ContainerNamesMap map[string]string   `json:"containerNamesMap"`
+	ContainerPathsMap map[string][]string `json:"containerPathsMap"`
 }
 
 type TLXSubmissionEntry struct {
-	ID             int    `json:"id"`
-	JID            string `json:"jid"`
-	UserJID        string `json:"userJid"`
-	ProblemJID     string `json:"problemJid"`
-	ContainerJID   string `json:"containerJid"`
-	GradingEngine  string `json:"gradingEngine"`
+	ID              int    `json:"id"`
+	JID             string `json:"jid"`
+	UserJID         string `json:"userJid"`
+	ProblemJID      string `json:"problemJid"`
+	ContainerJID    string `json:"containerJid"`
+	GradingEngine   string `json:"gradingEngine"`
 	GradingLanguage string `json:"gradingLanguage"`
-	Time           int64  `json:"time"`
-	LatestGrading  *struct {
+	Time            int64  `json:"time"`
+	LatestGrading   *struct {
 		Verdict struct {
 			Code string `json:"code"`
 		} `json:"verdict"`
@@ -347,10 +435,16 @@ func (c *Client) GetAllSubmissions(username, token string, maxPages int) (*TLXSu
 			merged.ContainerPathsMap[k] = v
 		}
 
-		if !result.Data.HasNextPage || len(result.Data.Page) == 0 {
+		if !result.Data.HasPreviousPage || len(result.Data.Page) == 0 {
 			break
 		}
-		beforeId = result.Data.Page[len(result.Data.Page)-1].ID
+		// The cursor is the oldest id on this page. If it fails to move backwards
+		// the API is repeating itself — stop rather than spin forever.
+		next := result.Data.Page[len(result.Data.Page)-1].ID
+		if beforeId != 0 && next >= beforeId {
+			break
+		}
+		beforeId = next
 	}
 	return merged, nil
 }
@@ -394,3 +488,35 @@ func (c *Client) GetLatestVerdict(problemJid, username, submissionJid, token str
 	return &Verdict{Code: "?"}, nil
 }
 
+// UserStats is what TLX itself reports on a profile page: counts per PROBLEM
+// (best verdict per problem), not per submission. This is the authoritative
+// answer to "how many problems have I solved on TLX" — CPHub's own totals are
+// derived from the submission list, which covers less history, so the two are
+// shown side by side and labelled rather than silently disagreeing.
+type UserStats struct {
+	TotalScores        int            `json:"totalScores"`
+	TotalProblemsTried int            `json:"totalProblemsTried"`
+	VerdictsMap        map[string]int `json:"totalProblemVerdictsMap"`
+}
+
+// Solved counts problems whose best verdict means accepted.
+func (s *UserStats) Solved() int {
+	return s.VerdictsMap["AC"] + s.VerdictsMap["OK"]
+}
+
+// GetUserStats reads the public per-problem stats for a username. No token needed.
+func (c *Client) GetUserStats(username string) (*UserStats, error) {
+	if username == "" {
+		return nil, fmt.Errorf("empty TLX username")
+	}
+	if !c.official {
+		// Lives in the tlx/* package upstream, gated behind Mode.TLX — a stock
+		// Judgels deployment does not expose it.
+		return nil, fmt.Errorf("per-problem stats are a TLX-only endpoint; %s does not serve it", c.apiBase)
+	}
+	var out UserStats
+	if err := c.get("/stats/users/?username="+url.QueryEscape(username), "", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

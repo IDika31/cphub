@@ -2,35 +2,38 @@ package grader
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 type Language string
 
 const (
-	LangCPP17    Language = "cpp17"
-	LangCPP20    Language = "cpp20"
-	LangPython3  Language = "python3"
-	LangJava21   Language = "java21"
-	LangNodeJS   Language = "nodejs"
+	LangCPP17   Language = "cpp17"
+	LangCPP20   Language = "cpp20"
+	LangPython3 Language = "python3"
+	LangJava21  Language = "java21"
+	LangNodeJS  Language = "nodejs"
 )
 
 type LangConfig struct {
-	Extension    string
-	CompileCmd   string
-	CompileArgs  []string
-	RunCmd       string
-	RunArgs      []string
-	IsCompiled   bool
-	SourceFile   string
-	BinaryFile   string
+	Extension   string
+	CompileCmd  string
+	CompileArgs []string
+	RunCmd      string
+	RunArgs     []string
+	IsCompiled  bool
+	SourceFile  string
+	BinaryFile  string
 }
 
 var Languages = map[Language]LangConfig{
 	LangCPP17: {
 		Extension:   ".cpp",
 		CompileCmd:  "/usr/bin/g++",
-		CompileArgs: []string{"-std=c++17", "-O2", "-Wall", "-fsanitize=undefined", "-o", "solution", "source.cpp"},
+		CompileArgs: []string{"-std=c++17", "-O2", "-Wall", "-o", "solution", "source.cpp"},
 		RunCmd:      "./solution",
 		RunArgs:     []string{},
 		IsCompiled:  true,
@@ -40,7 +43,7 @@ var Languages = map[Language]LangConfig{
 	LangCPP20: {
 		Extension:   ".cpp",
 		CompileCmd:  "/usr/bin/g++",
-		CompileArgs: []string{"-std=c++20", "-O2", "-Wall", "-fsanitize=undefined", "-o", "solution", "source.cpp"},
+		CompileArgs: []string{"-std=c++20", "-O2", "-Wall", "-o", "solution", "source.cpp"},
 		RunCmd:      "./solution",
 		RunArgs:     []string{},
 		IsCompiled:  true,
@@ -79,6 +82,38 @@ var Languages = map[Language]LangConfig{
 	},
 }
 
+func init() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	for lang, cfg := range Languages {
+		if i := strings.LastIndex(cfg.CompileCmd, "/"); i >= 0 {
+			cfg.CompileCmd = cfg.CompileCmd[i+1:]
+		}
+		if strings.HasPrefix(cfg.RunCmd, "/") {
+			if i := strings.LastIndex(cfg.RunCmd, "/"); i >= 0 {
+				cfg.RunCmd = cfg.RunCmd[i+1:]
+			}
+		}
+		if cfg.RunCmd == "solution" || cfg.RunCmd == "./solution" {
+			cfg.RunCmd = ".\\solution.exe"
+			cfg.BinaryFile = "solution.exe"
+			newArgs := make([]string, len(cfg.CompileArgs))
+			copy(newArgs, cfg.CompileArgs)
+			for i, a := range newArgs {
+				if a == "solution" {
+					newArgs[i] = "solution.exe"
+				}
+			}
+			cfg.CompileArgs = newArgs
+		}
+		if lang == LangPython3 {
+			cfg.RunCmd = "python"
+		}
+		Languages[lang] = cfg
+	}
+}
+
 func (l Language) Valid() bool {
 	_, ok := Languages[l]
 	return ok
@@ -109,24 +144,24 @@ const (
 )
 
 type TestResult struct {
-	Index     int     `json:"index"`
-	Verdict   Verdict `json:"verdict"`
-	Runtime   int64   `json:"runtime"`
-	Memory    int64   `json:"memory"`
-	Input     string  `json:"input"`
-	Expected  string  `json:"expected"`
-	Output    string  `json:"output"`
-	Error     string  `json:"error,omitempty"`
+	Index    int     `json:"index"`
+	Verdict  Verdict `json:"verdict"`
+	Runtime  int64   `json:"runtime"`
+	Memory   int64   `json:"memory"`
+	Input    string  `json:"input"`
+	Expected string  `json:"expected"`
+	Output   string  `json:"output"`
+	Error    string  `json:"error,omitempty"`
 }
 
 type GraderResult struct {
-	Verdict     Verdict      `json:"verdict"`
-	TotalTests  int          `json:"totalTests"`
-	PassedTests int          `json:"passedTests"`
-	MaxRuntime  int64        `json:"maxRuntime"`
-	MaxMemory   int64        `json:"maxMemory"`
-	Results     []TestResult `json:"results"`
-	CompileError string      `json:"compileError,omitempty"`
+	Verdict      Verdict      `json:"verdict"`
+	TotalTests   int          `json:"totalTests"`
+	PassedTests  int          `json:"passedTests"`
+	MaxRuntime   int64        `json:"maxRuntime"`
+	MaxMemory    int64        `json:"maxMemory"`
+	Results      []TestResult `json:"results"`
+	CompileError string       `json:"compileError,omitempty"`
 }
 
 // Normalize output for comparison: trim whitespace and trailing newlines
@@ -164,7 +199,8 @@ func AggregateVerdict(results []TestResult) Verdict {
 
 // Format compile error for user display
 func FormatCompileError(stderr string) string {
-	// Strip temp dir paths for cleaner output
-	s := strings.ReplaceAll(stderr, "/tmp/cphub-", "$TMPDIR/")
+	tmpDir := filepath.Join(os.TempDir(), "cphub-")
+	s := strings.ReplaceAll(stderr, tmpDir, "$TMPDIR/")
+	s = strings.ReplaceAll(s, "/tmp/cphub-", "$TMPDIR/")
 	return fmt.Sprintf("Compilation Error:\n%s", s)
 }

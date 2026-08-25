@@ -103,7 +103,7 @@ export default function ProblemStatement({ html, title }: ProblemStatementProps)
 
   if (pdfUrl) {
     return (
-      <div className="problem-statement-content text-[15px] leading-relaxed text-[#e4e4e7]">
+      <div className="problem-statement-content text-[14px] leading-[1.65] text-[#e4e4e7]">
         {title && <h2 className="text-[16px] font-semibold mb-3">{title}</h2>}
         <iframe
           src={pdfUrl}
@@ -115,7 +115,7 @@ export default function ProblemStatement({ html, title }: ProblemStatementProps)
           href={pdfUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-block mt-2 text-[12px] text-[#8b5cf6] hover:underline"
+          className="inline-block mt-2 text-[12px] text-[#a78bfa] hover:underline"
         >
           Buka PDF di tab baru ↗
         </a>
@@ -124,11 +124,11 @@ export default function ProblemStatement({ html, title }: ProblemStatementProps)
   }
 
   return (
-    <div className="problem-statement-content text-[15px] leading-relaxed text-[#e4e4e7]">
+    <div className="problem-statement-content text-[14px] leading-[1.65] text-[#e4e4e7]">
       {title && <h2 className="text-[16px] font-semibold mb-3">{title}</h2>}
       <div
         ref={containerRef}
-        className="statement-body [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-0.5 [&_pre]:bg-[#0f0f10] [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:text-[12px] [&_pre]:font-mono [&_pre]:whitespace-pre-wrap [&_.section-title]:text-[14px] [&_.section-title]:font-semibold [&_.section-title]:mb-2 [&_.section-title]:text-[#e4e4e7] [&_.katex]:text-[#e4e4e7] [&_.katex-display]:my-2"
+        className="statement-body break-words [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-0.5 [&_pre]:bg-[#0f0f10] [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:text-[12px] [&_pre]:font-mono [&_pre]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:border [&_pre]:border-white/5 [&_img]:max-w-full [&_img]:h-auto [&_img]:my-2 [&_img]:rounded-[4px] [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:my-2 [&_table]:text-[13px] [&_td]:border [&_td]:border-white/10 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-white/10 [&_th]:px-2 [&_th]:py-1 [&_.section-title]:text-[13px] [&_.section-title]:font-semibold [&_.section-title]:mb-2 [&_.section-title]:text-[#d4d4d8] [&_.katex]:text-[#e4e4e7] [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden"
       />
     </div>
   );

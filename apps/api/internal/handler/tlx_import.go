@@ -34,17 +34,52 @@ func (h *TLXImportHandler) ImportTLX(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "URL TLX wajib diisi"})
 	}
 
-	slug, alias, err := parseTLXURL(input.URL)
+	host, slug, alias, err := parseTLXURL(input.URL)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "URL TLX tidak valid — format: https://tlx.toki.id/problems/{slug}/{alias}"})
 	}
 
+	// The host decides which instance and which stored account to use. This used
+	// to be dropped on the floor: a self-hosted URL was fetched from the official
+	// TLX with the official token and saved as provider "tlx", so it either failed
+	// or — when the slug happened to exist on both — silently imported the wrong
+	// instance's copy under the wrong provider.
+	provider := "tlx"
+	displayHost := "tlx.toki.id"
+	if host != "" && !strings.EqualFold(host, "tlx.toki.id") {
+		provider = ProviderTLXCustom
+		displayHost = host
+	}
+
 	var account model.LinkedAccount
-	if err := h.db.Where("user_id = ? AND provider = ?", uid, "tlx").First(&account).Error; err != nil {
+	q := h.db.Where("user_id = ? AND provider = ?", uid, provider)
+	if provider == ProviderTLXCustom {
+		q = q.Where("handle = ?", host)
+	}
+	if err := q.First(&account).Error; err != nil {
+		if provider == ProviderTLXCustom {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Instance " + host + " belum di-login — buka Connections dan login dulu",
+			})
+		}
 		return c.Status(400).JSON(fiber.Map{"error": "Akun TLX belum dihubungkan — hubungkan di halaman Connections"})
+	}
+	if account.AccessToken == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Belum ada token untuk " + displayHost + " — login dulu di Connections",
+		})
 	}
 
 	tlxClient := tlx.NewClient()
+	if provider == ProviderTLXCustom {
+		// provider_user_id holds the API host the extension reported; api.<host> is
+		// the Judgels convention when it is missing.
+		apiHost := account.ProviderUserID
+		if apiHost == "" {
+			apiHost = "api." + host
+		}
+		tlxClient = tlx.NewClientFor(apiHost)
+	}
 
 	ps, err := tlxClient.GetProblemSetBySlug(slug, account.AccessToken)
 	if err != nil {
@@ -69,14 +104,14 @@ func (h *TLXImportHandler) ImportTLX(c *fiber.Ctx) error {
 
 	problemID := slug + "-" + alias
 	problem := &model.Problem{
-		Provider:     "tlx",
+		Provider:     provider,
 		ProblemID:    problemID,
 		Title:        ws.Title,
 		Statement:    ws.Statement,
 		TimeLimit:    ws.TimeLimit(),
 		MemoryLimit:  ws.MemoryLimit(),
 		Tags:         "[]",
-		URL:          fmt.Sprintf("https://tlx.toki.id/problems/%s/%s", slug, alias),
+		URL:          fmt.Sprintf("https://%s/problems/%s/%s", displayHost, slug, alias),
 		Status:       "synced",
 		ProblemGroup: ps.Name,
 	}
@@ -87,25 +122,28 @@ func (h *TLXImportHandler) ImportTLX(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan problem"})
 	}
 
-	log.Printf("[tlx-import] imported: %s — %q (user=%s)", problemID, ws.Title, userID)
+	log.Printf("[tlx-import] imported %s: %s — %q (user=%s)", displayHost, problemID, ws.Title, userID)
 	return c.JSON(fiber.Map{
 		"id":        problem.ID.String(),
 		"problemId": problemID,
 		"title":     ws.Title,
-		"provider":  "tlx",
+		"provider":  provider,
+		"host":      displayHost,
 	})
 }
 
-// parseTLXURL extracts slug and alias from a TLX problem URL.
-// Expected: https://tlx.toki.id/problems/{slug}/{alias}
-func parseTLXURL(rawURL string) (slug, alias string, err error) {
+// parseTLXURL extracts the instance host, slug and alias from a Judgels/TLX
+// problem URL. The host matters: a self-hosted instance serves the same paths as
+// tlx.toki.id, so it is the only thing that says which one to talk to.
+// Expected: https://{host}/problems/{slug}/{alias}
+func parseTLXURL(rawURL string) (host, slug, alias string, err error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid URL: %w", err)
+		return "", "", "", fmt.Errorf("invalid URL: %w", err)
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 3 || parts[0] != "problems" || parts[1] == "" || parts[2] == "" {
-		return "", "", fmt.Errorf("expected /problems/{slug}/{alias}, got %q", u.Path)
+		return "", "", "", fmt.Errorf("expected /problems/{slug}/{alias}, got %q", u.Path)
 	}
-	return parts[1], parts[2], nil
+	return strings.ToLower(u.Hostname()), parts[1], parts[2], nil
 }

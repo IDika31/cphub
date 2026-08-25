@@ -28,12 +28,12 @@ export default function OnboardingPage() {
   const router = useRouter();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f0f10]">
-      <div className="w-full max-w-[480px] bg-[#18181b] rounded-[12px] border border-[rgba(255,255,255,0.08)] p-[40px]">
+    <div className="min-h-screen flex items-center justify-center bg-[#0f0f10] p-4">
+      <div className="w-full max-w-[480px] bg-[#18181b] rounded-[12px] border border-[rgba(255,255,255,0.08)] p-[24px] sm:p-[40px]">
         <h1 className="text-[24px] font-semibold text-[#e4e4e7] mb-2 text-center">
           Selamat Datang di CPHub V4!
         </h1>
-        <p className="text-[13px] text-[#71717a] mb-8 text-center">
+        <p className="text-[13px] text-[#a1a1aa] mb-8 text-center">
           Tiga langkah untuk memulai
         </p>
 
@@ -43,14 +43,14 @@ export default function OnboardingPage() {
               key={i}
               className="flex gap-4 p-[16px] rounded-[8px] bg-[#1f1f23] border border-[rgba(255,255,255,0.08)]"
             >
-              <div className="w-8 h-8 rounded-full bg-[rgba(139,92,246,0.15)] text-[#8b5cf6] flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[rgba(139,92,246,0.15)] text-[#a78bfa] flex items-center justify-center flex-shrink-0">
                 <step.icon className="w-4 h-4" />
               </div>
               <div>
                 <h3 className="text-[13px] font-semibold text-[#e4e4e7] mb-1">
                   {i + 1}. {step.title}
                 </h3>
-                <p className="text-[12px] text-[#71717a]">{step.description}</p>
+                <p className="text-[12px] text-[#a1a1aa]">{step.description}</p>
               </div>
             </div>
           ))}

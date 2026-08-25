@@ -1,6 +1,6 @@
 import { logger } from "../shared/logger";
 import { MESSAGE_TYPES, type Message, type MessageResponse } from "../shared/messages";
-import type { SyncPayload } from "../shared/api";
+import { getWebUrl, pushCustomTLXHosts, type SyncPayload } from "../shared/api";
 import { handleMessage } from "./handler";
 import { registerAlarms, handleAlarm } from "./alarm";
 
@@ -9,9 +9,10 @@ let tlxHosts: string[] = DEFAULT_TLX_HOSTS;
 let tlxApiHostMap: Record<string, string> = {};
 
 async function loadTlxHosts(): Promise<void> {
+  let custom: { host: string; apiHost?: string; name?: string }[] = [];
   try {
     const result = await chrome.storage.sync.get("customTlxHosts");
-    const custom: {host: string; apiHost?: string}[] = result.customTlxHosts ?? [];
+    custom = result.customTlxHosts ?? [];
     tlxHosts = [...DEFAULT_TLX_HOSTS, ...custom.map((c) => c.host)];
     tlxApiHostMap = {};
     for (const c of custom) {
@@ -20,6 +21,15 @@ async function loadTlxHosts(): Promise<void> {
   } catch {
     tlxHosts = DEFAULT_TLX_HOSTS;
     tlxApiHostMap = {};
+    return;
+  }
+  // Mirror the list into CPHub so each custom instance appears in Connections
+  // as its own provider. Best effort: an unpaired or offline extension keeps
+  // working locally.
+  try {
+    await pushCustomTLXHosts(custom);
+  } catch (err) {
+    logger.warn("Could not register custom TLX hosts with CPHub", err);
   }
 }
 
@@ -62,10 +72,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
 });
 
-const WEB_BASE = "http://localhost:3000";
-
-function openTLXImport(tlxUrl: string) {
-  let importUrl = `${WEB_BASE}/problems/import?url=${encodeURIComponent(tlxUrl)}`;
+async function openTLXImport(tlxUrl: string) {
+  const webBase = await getWebUrl();
+  let importUrl = `${webBase}/problems/import?url=${encodeURIComponent(tlxUrl)}`;
   try {
     const hostname = new URL(tlxUrl).hostname;
     const apiHost = tlxApiHostMap[hostname];
@@ -74,8 +83,45 @@ function openTLXImport(tlxUrl: string) {
   chrome.tabs.create({ url: importUrl });
 }
 
+// Alt+C lands here from two directions: chrome.commands when the shortcut is
+// bound, and the OPEN_EDITOR message from the content-script fallback when it is
+// not (Brave and Edge routinely drop a suggested_key another extension claimed).
+// Both paths share this one function so they can never drift apart.
+async function openEditorForTab(url: string, tabId?: number) {
+  if (!url) return;
+  const webBase = await getWebUrl();
+
+  if (isTlxUrl(url)) {
+    if (isTlxProblemUrl(url)) {
+      await openTLXImport(url);
+    } else {
+      chrome.tabs.create({ url: `${webBase}/problems?provider=tlx` });
+    }
+    return;
+  }
+
+  if (url.includes("codeforces.com")) {
+    // Sync first so the editor has the statement and samples when it opens.
+    if (tabId !== undefined) {
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: MESSAGE_TYPES.SYNC_PROBLEM });
+      } catch { /* no content script on this page — the editor still opens */ }
+    }
+    const cfMatch =
+      url.match(/codeforces\.com\/contest\/(\d+)\/problem\/([A-Za-z]\d*)/) ||
+      url.match(/codeforces\.com\/problemset\/problem\/(\d+)\/([A-Za-z]\d*)/);
+    const cfId = cfMatch ? `${cfMatch[1]}${cfMatch[2].toUpperCase()}` : "";
+    chrome.tabs.create({
+      url: cfId ? `${webBase}/problems/${cfId}` : `${webBase}/problems?provider=codeforces`,
+    });
+    return;
+  }
+
+  chrome.tabs.create({ url: `${webBase}/dashboard` });
+}
+
 chrome.runtime.onMessage.addListener(
-  (message: Message<SyncPayload>, _sender, sendResponse) => {
+  (message: Message<SyncPayload>, sender, sendResponse) => {
     // TLX import is web-mediated: open the CPHub import route which calls
     // import-tlx server-side using the user's stored token.
     if (message.type === MESSAGE_TYPES.OPEN_TLX_IMPORT) {
@@ -86,6 +132,18 @@ chrome.runtime.onMessage.addListener(
       } else {
         sendResponse({ success: false, error: "Missing TLX url" });
       }
+      return true;
+    }
+
+    // Content-script fallback for Alt+C. Without this branch the message fell
+    // through to handleMessage(), which does not know the type — so whenever
+    // chrome.commands failed to bind the shortcut, Alt+C did nothing at all.
+    if (message.type === MESSAGE_TYPES.OPEN_EDITOR) {
+      const fromPayload = (message.payload as { url?: string } | undefined)?.url;
+      const url = sender.tab?.url || fromPayload || "";
+      openEditorForTab(url, sender.tab?.id)
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => sendResponse({ success: false, error: (err as Error).message }));
       return true;
     }
 
@@ -174,22 +232,28 @@ function webappBridgeFunc() {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
   const url = tab.url || "";
-  if (url.startsWith("http://localhost:3000") || url.startsWith("https://localhost:3000")) {
-    chrome.scripting.executeScript({
-      target: { tabId },
-      func: webappBridgeFunc,
-      world: "ISOLATED",
-    }).catch(() => {/* tab may have navigated away */});
-    return;
-  }
-  // Inject TLX content script on custom TLX hosts (static manifest handles tlx.toki.id)
-  if (isTlxUrl(url) && !url.includes("tlx.toki.id")) {
-    chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["src/content/tlx.ts"],
-      world: "ISOLATED",
-    }).catch(() => {/* tab may have navigated away */});
-  }
+  void getWebUrl().then((webBase) => {
+    // Inject the webapp bridge into CPHub web tabs (localhost or configured domain)
+    const isWebTab = url.startsWith("http://localhost:3000") ||
+      url.startsWith("https://localhost:3000") ||
+      url.startsWith(webBase);
+    if (isWebTab) {
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: webappBridgeFunc,
+        world: "ISOLATED",
+      }).catch(() => {/* tab may have navigated away */});
+      return;
+    }
+    // Inject TLX content script on custom TLX hosts (static manifest handles tlx.toki.id)
+    if (isTlxUrl(url) && !url.includes("tlx.toki.id")) {
+      chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["src/content/tlx.ts"],
+        world: "ISOLATED",
+      }).catch(() => {/* tab may have navigated away */});
+    }
+  });
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
@@ -203,33 +267,11 @@ chrome.commands.onCommand.addListener(async (command) => {
     }
   }
   if (command === "open-dashboard") {
-    chrome.tabs.create({ url: "http://localhost:3000" });
+    chrome.tabs.create({ url: await getWebUrl() });
   }
   if (command === "open-editor") {
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (!tab?.url || !tab?.id) return;
-      const url = tab.url;
-      const isCF = url.includes("codeforces.com");
-
-      if (isTlxUrl(url)) {
-        openTLXImport(url);
-        return;
-      }
-
-      if (isCF) {
-        // Trigger sync first
-        chrome.tabs.sendMessage(tab.id, { type: MESSAGE_TYPES.SYNC_PROBLEM });
-        // Extract CF problem ID from URL for direct editor link
-        const cfMatch = url.match(/codeforces\.com\/contest\/(\d+)\/problem\/([A-Z]\d*)/) || url.match(/codeforces\.com\/problemset\/problem\/(\d+)\/([A-Z]\d*)/);
-        const cfId = cfMatch ? `${cfMatch[1]}${cfMatch[2]}` : "";
-        const editorUrl = cfId
-          ? `${WEB_BASE}/problems/${cfId}`
-          : `${WEB_BASE}/problems?provider=codeforces`;
-        chrome.tabs.create({ url: editorUrl });
-      } else {
-        chrome.tabs.create({ url: `${WEB_BASE}/dashboard` });
-      }
-    });
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url) await openEditorForTab(tab.url, tab.id);
   }
 });
 

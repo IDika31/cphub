@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const TempBaseDir = "/tmp/cphub-grader"
+var TempBaseDir = filepath.Join(os.TempDir(), "cphub-grader")
 
 type TempDir struct {
 	Path       string

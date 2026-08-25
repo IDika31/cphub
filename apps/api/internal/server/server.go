@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/IDika31/cphub/api/internal/database"
@@ -24,6 +23,9 @@ type Server struct {
 type ServerConfig struct {
 	Port string
 	Host string
+	// CORSOrigins is the deployment's allowlist. Empty falls back to the dev
+	// origin so a local run still works without configuration.
+	CORSOrigins string
 }
 
 func New(cfg ServerConfig) *Server {
@@ -33,16 +35,24 @@ func New(cfg ServerConfig) *Server {
 		ErrorHandler: errorHandler,
 		JSONEncoder:  nil, // use standard encoding/json
 		JSONDecoder:  nil,
+		// App runs behind a reverse proxy (Caddy/Cloudflare): trust
+		// X-Forwarded-* so c.IP()/c.Protocol() reflect the real client.
+		EnableIPValidation: true,
+		ProxyHeader:        fiber.HeaderXForwardedFor,
 	})
 
 	app.Use(recover.New())
 	app.Use(logger.New(logger.Config{
 		Format: "${time} | ${status} | ${latency} | ${method} ${path}\n",
 	}))
+	origins := cfg.CORSOrigins
+	if origins == "" {
+		origins = "http://localhost:3000"
+	}
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http://localhost:3000",
+		AllowOrigins:     origins,
 		AllowMethods:     "GET,POST,PUT,DELETE,PATCH,OPTIONS",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-HMAC-Signature,X-Nonce",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-HMAC-Signature,X-Nonce,X-Key-Id",
 		AllowCredentials: true,
 	}))
 
@@ -67,7 +77,7 @@ func (s *Server) Listen() error {
 	}()
 
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(quit, os.Interrupt)
 	<-quit
 
 	log.Println("[server] shutting down...")

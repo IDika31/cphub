@@ -44,7 +44,7 @@ function ImportInner() {
               <AlertCircle className="w-5 h-5" />
             </div>
             <p className="text-[13px] text-[#e4e4e7]">{error}</p>
-            {url && <p className="text-[11px] text-[#71717a] break-all">{url}</p>}
+            {url && <p className="text-[11px] text-[#a1a1aa] break-all">{url}</p>}
             <div className="flex gap-2 mt-1">
               <Link href="/problems"><Button variant="default">Ke Problemset</Button></Link>
               <Link href="/connections"><Button variant="ghost">Cek Connections</Button></Link>
@@ -52,9 +52,9 @@ function ImportInner() {
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3 text-center">
-            <Loader2 className="w-6 h-6 text-[#8b5cf6] animate-spin" />
+            <Loader2 className="w-6 h-6 text-[#a78bfa] animate-spin" />
             <p className="text-[13px] text-[#a1a1aa]">Mengimport problem dari TLX...</p>
-            {url && <p className="text-[11px] text-[#71717a] break-all max-w-[360px]">{url}</p>}
+            {url && <p className="text-[11px] text-[#a1a1aa] break-all max-w-[360px]">{url}</p>}
           </div>
         )}
       </div>
@@ -64,7 +64,7 @@ function ImportInner() {
 
 export default function ImportTLXPage() {
   return (
-    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[13px] text-[#52525b]">Loading...</div>}>
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[13px] text-[#a1a1aa]">Loading...</div>}>
       <ImportInner />
     </Suspense>
   );

@@ -3,13 +3,13 @@ type BadgeVariant = "cf" | "difficulty" | "time" | "verdict-ac" | "verdict-wa" |
 const variantStyles: Record<BadgeVariant, string> = {
   cf: "bg-[rgba(59,130,246,0.15)] text-[#60a5fa]",
   difficulty: "bg-[rgba(245,158,11,0.15)] text-[#fbbf24]",
-  time: "bg-[#1f1f23] text-[#71717a] border border-[rgba(255,255,255,0.08)]",
+  time: "bg-[#1f1f23] text-[#a1a1aa] border border-[rgba(255,255,255,0.08)]",
   "verdict-ac": "bg-[rgba(16,185,129,0.15)] text-[#34d399]",
   "verdict-wa": "bg-[rgba(239,68,68,0.15)] text-[#ef4444]",
   "verdict-tle": "bg-[rgba(245,158,11,0.15)] text-[#f59e0b]",
-  "verdict-ce": "bg-[rgba(139,92,246,0.15)] text-[#8b5cf6]",
+  "verdict-ce": "bg-[rgba(139,92,246,0.15)] text-[#a78bfa]",
   "verdict-re": "bg-[rgba(239,68,68,0.15)] text-[#ef4444]",
-  "verdict-pending": "bg-[#1f1f23] text-[#71717a]",
+  "verdict-pending": "bg-[#1f1f23] text-[#a1a1aa]",
 };
 
 interface BadgeProps {

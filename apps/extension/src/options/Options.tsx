@@ -4,22 +4,30 @@ import { pingAPI } from "../shared/api";
 
 export default function Options() {
   const [apiUrl, setApiUrl] = useState("http://localhost:3001");
-  const [hmacSecret, setHmacSecret] = useState("");
+  const [webUrl, setWebUrl] = useState("http://localhost:3000");
+  const [pairingToken, setPairingToken] = useState("");
   const [connectionStatus, setConnectionStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     (async () => {
       const url = await getSetting("apiUrl");
-      const secret = await getSetting("hmacSecret");
+      const web = await getSetting("webUrl");
+      const token = await getSetting("pairingToken");
       if (url) setApiUrl(url);
-      if (secret) setHmacSecret(secret);
+      if (web) setWebUrl(web);
+      if (token) setPairingToken(token);
     })();
   }, []);
 
   async function save() {
-    await setSetting("apiUrl", apiUrl);
-    await setSetting("hmacSecret", hmacSecret);
-    alert("Settings saved");
+    // Trailing slashes break every path concatenation downstream.
+    const trim = (u: string) => u.trim().replace(/\/+$/, "");
+    await setSetting("apiUrl", trim(apiUrl));
+    await setSetting("webUrl", trim(webUrl));
+    await setSetting("pairingToken", pairingToken.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   }
 
   async function testConnection() {
@@ -81,18 +89,39 @@ export default function Options() {
           />
         </div>
 
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#475569", marginBottom: 6 }}>
+            Web Dashboard URL
+          </label>
+          <input
+            type="text"
+            value={webUrl}
+            onChange={(e) => setWebUrl(e.target.value)}
+            className={inputClass}
+            placeholder="https://cphub.example.com"
+          />
+          <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
+            Where Alt+C opens the editor. Point this at your CPHub deployment, not localhost,
+            unless you run the dashboard on this machine.
+          </p>
+        </div>
+
         <div style={{ marginBottom: 24 }}>
           <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#475569", marginBottom: 6 }}>
-            HMAC Secret
+            Pairing Token
           </label>
           <input
             type="password"
-            value={hmacSecret}
-            onChange={(e) => setHmacSecret(e.target.value)}
+            value={pairingToken}
+            onChange={(e) => setPairingToken(e.target.value)}
             className={inputClass}
-            placeholder="Paste from CPHub Settings"
+            placeholder="Paste from CPHub Settings — unique per account"
             style={{ fontFamily: "monospace" }}
           />
+          <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0" }}>
+            Format <code>accountId.secret</code>. Without it every sync is refused with
+            &ldquo;Missing X-Key-Id&rdquo;. Rotating it in CPHub Settings invalidates this one.
+          </p>
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
@@ -110,7 +139,7 @@ export default function Options() {
               fontFamily: "inherit",
             }}
           >
-            Save Settings
+            {saved ? "Saved ✓" : "Save Settings"}
           </button>
           <button
             onClick={testConnection}

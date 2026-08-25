@@ -3,6 +3,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
+# Detect Windows (Git Bash / MSYS2 / Cygwin)
+EXE=""
+PKG="bun"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) EXE=".exe"; PKG="npm" ;;
+esac
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -54,12 +61,29 @@ needs_build() {
 echo -e "${GREEN}Starting CPHub V4 dev environment...${NC}"
 echo ""
 
+# --- Install deps if missing or incompatible ---
+for app in web extension; do
+  appdir="$ROOT/apps/$app"
+  if [ ! -d "$appdir/node_modules" ]; then
+    echo -e "${YELLOW}Installing $app dependencies...${NC}"
+    ( cd "$appdir" && $PKG install )
+    echo -e "${GREEN}$app deps installed.${NC}"
+    echo ""
+  elif [ "$PKG" = "npm" ] && [ ! -f "$appdir/package-lock.json" ]; then
+    echo -e "${YELLOW}Reinstalling $app deps with npm (bun tree incompatible)...${NC}"
+    rm -rf "$appdir/node_modules" "$appdir/bun.lockb"
+    ( cd "$appdir" && npm install )
+    echo -e "${GREEN}$app deps reinstalled.${NC}"
+    echo ""
+  fi
+done
+
 # --- API ---
-if needs_build "$ROOT/apps/api/bin/cphub-api" \
+if needs_build "$ROOT/apps/api/bin/cphub-api$EXE" \
     "$ROOT/apps/api/cmd" "$ROOT/apps/api/internal" \
     "$ROOT/apps/api/go.mod" "$ROOT/apps/api/go.sum"; then
   echo -e "${YELLOW}Building API...${NC}"
-  ( cd "$ROOT/apps/api" && go build -o ./bin/cphub-api ./cmd/main.go )
+  ( cd "$ROOT/apps/api" && go build -o "./bin/cphub-api$EXE" ./cmd/main.go )
   echo -e "${GREEN}API build OK.${NC}"
 else
   echo -e "${GREEN}API up to date — skip build.${NC}"
@@ -72,7 +96,7 @@ if needs_build "$ROOT/apps/web/.next/BUILD_ID" \
     "$ROOT/apps/web/next.config.mjs" "$ROOT/apps/web/postcss.config.mjs" \
     "$ROOT/apps/web/tailwind.config.ts" "$ROOT/apps/web/tsconfig.json"; then
   echo -e "${YELLOW}Building web...${NC}"
-  ( cd "$ROOT/apps/web" && bun run build )
+  ( cd "$ROOT/apps/web" && $PKG run build )
   echo -e "${GREEN}Web build OK.${NC}"
 else
   echo -e "${GREEN}Web up to date — skip build.${NC}"
@@ -85,18 +109,18 @@ if needs_build "$ROOT/apps/extension/dist/manifest.json" \
     "$ROOT/apps/extension/vite.config.ts" "$ROOT/apps/extension/tsconfig.json" \
     "$ROOT/apps/extension/package.json"; then
   echo -e "${YELLOW}Building extension...${NC}"
-  ( cd "$ROOT/apps/extension" && bun run build )
+  ( cd "$ROOT/apps/extension" && $PKG run build )
   echo -e "${GREEN}Extension build OK.${NC}"
 else
   echo -e "${GREEN}Extension up to date — skip build.${NC}"
 fi
 echo ""
 
-( cd "$ROOT/apps/api" && ./bin/cphub-api 2>&1 ) \
+( cd "$ROOT/apps/api" && "./bin/cphub-api$EXE" 2>&1 ) \
   | prefix_output "$RED" "api" &
 pids+=($!)
 
-( cd "$ROOT/apps/web" && bun start 2>&1 ) \
+( cd "$ROOT/apps/web" && $PKG start 2>&1 ) \
   | prefix_output "$BLUE" "web" &
 pids+=($!)
 

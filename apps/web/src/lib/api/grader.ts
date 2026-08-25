@@ -5,6 +5,7 @@ export interface RunRequest {
   sourceCode: string;
   testCases: Array<{ input: string; output: string }>;
   timeoutSeconds?: number;
+  timeLimitMs?: number;
   memoryLimitMB?: number;
   problemId?: string;
 }
@@ -45,4 +46,20 @@ export async function getGraderStatus(token: string): Promise<{
   firejail: boolean;
 }> {
   return apiClient("/api/grader/status", { token });
+}
+
+// Providers store the limit as prose: "1 second", "2 seconds", sometimes plain
+// milliseconds. The grader wants milliseconds, and a wrong unit here is what made
+// correct solutions come back TLE.
+export function parseTimeLimitMs(raw?: string): number {
+  const n = parseFloat(raw ?? "");
+  if (!isFinite(n) || n <= 0) return 5000;
+  if (/ms|millisecond/i.test(raw ?? "") || n >= 100) return Math.round(n);
+  return Math.round(n * 1000);
+}
+
+export function parseMemoryLimitMb(raw?: string): number {
+  const n = parseFloat(raw ?? "");
+  if (!isFinite(n) || n <= 0) return 512;
+  return Math.round(n);
 }

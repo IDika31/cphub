@@ -3,7 +3,8 @@
 import { useState, useEffect, useId } from "react";
 import Topbar from "@/components/shell/topbar";
 import Button from "@/components/ui/button";
-import { Check } from "lucide-react";
+import { Check, Eye, EyeOff } from "lucide-react";
+import { apiClient } from "@/lib/api/client";
 
 const LANGUAGES = ["cpp17", "cpp20", "python3", "java21", "nodejs"];
 const DEFAULT_TEMPLATE = `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n  $CURSOR\n  return 0;\n}`;
@@ -13,21 +14,36 @@ function templateKey(lang: string) {
 }
 
 export default function SettingsPage() {
-  const [hmacSecret, setHmacSecret] = useState("loading...");
+  const [pairingToken, setPairingToken] = useState("loading...");
+  const [rotating, setRotating] = useState(false);
   const [language, setLanguage] = useState("cpp17");
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const langSelectId = useId();
 
+  // The pairing token is "<account id>.<secret>" — per account, so two users of
+  // the same CPHub install cannot sign for each other. Routed through apiClient
+  // so it resolves same-origin behind the reverse proxy instead of hardcoding
+  // localhost, which broke every non-local deployment.
+  function loadKey(method: "GET" | "POST", path: string) {
+    return apiClient<{ pairingToken?: string }>(path, { method })
+      .then((d) => setPairingToken(d.pairingToken ?? "failed to load"))
+      .catch(() => setPairingToken("failed to load"));
+  }
+
   useEffect(() => {
-    fetch("http://localhost:3001/api/auth/hmac-secret", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("cphub_token")}` },
-    })
-      .then((r) => r.json())
-      .then((d) => setHmacSecret(d.secret))
-      .catch(() => setHmacSecret("failed to load"));
+    loadKey("GET", "/api/auth/hmac-secret");
   }, []);
+
+  async function handleRotate() {
+    if (!confirm("Rotate pairing token? Extension yang masih pakai token lama akan berhenti sync sampai di-paste ulang.")) return;
+    setRotating(true);
+    await loadKey("POST", "/api/auth/hmac-secret/rotate");
+    setRotating(false);
+    setCopied(false);
+  }
 
   // Load the stored template whenever the selected language changes
   useEffect(() => {
@@ -43,7 +59,7 @@ export default function SettingsPage() {
   }
 
   function handleCopy() {
-    navigator.clipboard.writeText(hmacSecret);
+    navigator.clipboard.writeText(pairingToken);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -69,31 +85,35 @@ export default function SettingsPage() {
               aria-label={`Template ${language}`}
               className="w-full h-[200px] px-[12px] py-[10px] rounded-[6px] text-[13px] font-mono bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7] resize-y focus:outline-none focus:border-[#8b5cf6] transition-colors"
               spellCheck={false} />
-            <p className="text-[11px] text-[#71717a] mt-2">Gunakan <code className="text-[#8b5cf6]">$CURSOR</code> untuk posisi awal kursor. Disimpan per bahasa.</p>
+            <p className="text-[11px] text-[#a1a1aa] mt-2">Gunakan <code className="text-[#a78bfa]">$CURSOR</code> untuk posisi awal kursor. Disimpan per bahasa.</p>
           </div>
 
-          {/* Preferences */}
+          {/* Extension pairing token — a signing secret, so it stays masked
+              until asked for. Copy works without revealing it. */}
           <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] p-[16px]">
-            <h3 className="text-[14px] font-semibold text-[#e4e4e7] mb-3">Preferences</h3>
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" defaultChecked className="accent-[#8b5cf6] w-4 h-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]" />
-                <span className="text-[13px] text-[#e4e4e7]">Auto-sync from extension</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Extension HMAC Secret */}
-          <div className="bg-[#18181b] border border-[rgba(255,255,255,0.08)] rounded-[8px] p-[16px]">
-            <h3 className="text-[14px] font-semibold text-[#e4e4e7] mb-1">Extension HMAC Secret</h3>
-            <p className="text-[12px] text-[#a1a1aa] mb-3">Copy secret ini ke extension Settings tab untuk enable sync.</p>
-            <div className="flex items-center gap-2">
-              <input type="text" readOnly value={hmacSecret} aria-label="HMAC secret"
-                className="flex-1 px-[10px] py-[6px] rounded-[6px] text-[12px] font-mono bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7] focus:outline-none focus:border-[#8b5cf6]" />
+            <h3 className="text-[14px] font-semibold text-[#e4e4e7] mb-1">Extension Pairing Token</h3>
+            <p className="text-[12px] text-[#a1a1aa] mb-3">Unik per akun. Paste ke extension Settings tab untuk enable sync.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type={revealed ? "text" : "password"}
+                readOnly
+                value={pairingToken}
+                aria-label="Extension pairing token"
+                className="flex-1 min-w-[180px] px-[10px] py-[6px] rounded-[6px] text-[12px] font-mono bg-[#1f1f23] border border-[rgba(255,255,255,0.08)] text-[#e4e4e7] focus:outline-none focus:border-[#8b5cf6]"
+              />
+              <Button variant="ghost" onClick={() => setRevealed((v) => !v)} aria-pressed={revealed}>
+                {revealed ? (<><EyeOff className="w-3 h-3" /> Sembunyikan</>) : (<><Eye className="w-3 h-3" /> Tampilkan</>)}
+              </Button>
               <Button variant="default" onClick={handleCopy}>
                 {copied ? (<><Check className="w-3 h-3" /> Tersalin</>) : "Copy"}
               </Button>
+              <Button variant="ghost" onClick={handleRotate} disabled={rotating}>
+                {rotating ? "..." : "Rotate"}
+              </Button>
             </div>
+            <p className="text-[11px] text-[#a1a1aa] mt-2" aria-live="polite">
+              Rotate bikin token lama langsung tidak valid — extension harus di-paste ulang.
+            </p>
           </div>
         </div>
       </div>

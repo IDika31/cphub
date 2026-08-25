@@ -22,9 +22,14 @@ type CFConfig struct {
 	ClientID     string
 	ClientSecret string
 	RedirectURL  string
+	WebBaseURL   string
 }
 
 func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
+	webBase := strings.TrimRight(cfg.WebBaseURL, "/")
+	if webBase == "" {
+		webBase = "http://localhost:3000"
+	}
 	return func(c *fiber.Ctx) error {
 		code := c.Query("code")
 		state := c.Query("state")
@@ -33,7 +38,7 @@ func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 			errType := c.Query("error", "")
 			errDesc := c.Query("error_description", "")
 			log.Printf("[cf_oauth] authorization denied: error=%s desc=%s", errType, errDesc)
-			return c.Redirect("http://localhost:3000/connections?linked=codeforces&error="+errType, 302)
+			return c.Redirect(webBase+"/connections?linked=codeforces&error="+errType, 302)
 		}
 
 		if state == "" {
@@ -58,7 +63,7 @@ func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 		accessToken, idToken, err := exchangeCFToken(code, cfg)
 		if err != nil {
 			log.Printf("[cf_oauth] token exchange failed: %v", err)
-			return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=token_exchange", 302)
+			return c.Redirect(webBase+"/connections?linked=codeforces&error=token_exchange", 302)
 		}
 
 		// Step 2: Try OIDC id_token first, fallback to CF API
@@ -68,7 +73,7 @@ func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 			cfUser, err = fetchCFUserInfo(accessToken)
 			if err != nil {
 				log.Printf("[cf_oauth] user info fetch failed: %v", err)
-				return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=user_fetch", 302)
+				return c.Redirect(webBase+"/connections?linked=codeforces&error=user_fetch", 302)
 			}
 		}
 
@@ -93,7 +98,7 @@ func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 			}
 			if err := db.Create(&account).Error; err != nil {
 				log.Printf("[cf_oauth] failed to create account: %v", err)
-				return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=db_error", 302)
+				return c.Redirect(webBase+"/connections?linked=codeforces&error=db_error", 302)
 			}
 		} else {
 			account.AccessToken = accessToken
@@ -104,12 +109,12 @@ func HandleCodeforcesCallback(db *gorm.DB, cfg CFConfig) fiber.Handler {
 			account.IsConnected = true
 			if err := db.Save(&account).Error; err != nil {
 				log.Printf("[cf_oauth] failed to update account: %v", err)
-				return c.Redirect("http://localhost:3000/connections?linked=codeforces&error=db_error", 302)
+				return c.Redirect(webBase+"/connections?linked=codeforces&error=db_error", 302)
 			}
 		}
 
 		log.Printf("[cf_oauth] linked Codeforces account: %s (user=%s)", cfUser.Handle, userIDStr)
-		return c.Redirect("http://localhost:3000/connections?linked=codeforces&success=1", 302)
+		return c.Redirect(webBase+"/connections?linked=codeforces&success=1", 302)
 	}
 }
 

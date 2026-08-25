@@ -15,6 +15,8 @@ export async function fetchProblems(params?: {
   tag?: string;
   difficulty?: number;
   status?: string;
+  /** Matches title, problemId and tags server-side. */
+  q?: string;
 }): Promise<ProblemListResponse> {
   const searchParams = new URLSearchParams();
   if (params?.page) searchParams.set("page", String(params.page));
@@ -23,6 +25,7 @@ export async function fetchProblems(params?: {
   if (params?.tag) searchParams.set("tag", params.tag);
   if (params?.difficulty) searchParams.set("difficulty", String(params.difficulty));
   if (params?.status) searchParams.set("status", params.status);
+  if (params?.q) searchParams.set("q", params.q);
 
   const qs = searchParams.toString();
   return apiClient(`/api/problems${qs ? `?${qs}` : ""}`);

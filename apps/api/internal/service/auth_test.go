@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ func setupTestSvc(t *testing.T) *AuthService {
 		avatar_url TEXT,
 		auth_provider TEXT NOT NULL DEFAULT 'email',
 		google_id TEXT,
+		extension_secret TEXT,
 		is_onboarded NUMERIC DEFAULT 0,
 		last_login_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -105,11 +107,70 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	svc := setupTestSvc(t)
 
-	svc.Register(RegisterInput{Name: "U", Email: "u@example.com", Password: "correct"})
+	// 8+ chars, otherwise Register rejects it and this stops testing the
+	// wrong-password path at all.
+	if _, err := svc.Register(RegisterInput{Name: "U", Email: "u@example.com", Password: "correct1"}); err != nil {
+		t.Fatalf("setup register failed: %v", err)
+	}
 
-	_, err := svc.Login(LoginInput{Email: "u@example.com", Password: "wrong"})
+	_, err := svc.Login(LoginInput{Email: "u@example.com", Password: "wrong123"})
 	if err == nil {
 		t.Error("wrong password should fail")
+	}
+}
+
+// Addresses are case-insensitive in practice. Matching the column exactly meant
+// an account registered with any capital letter could not be signed into with
+// the lowercase spelling people actually type.
+func TestLogin_EmailIsCaseAndSpaceInsensitive(t *testing.T) {
+	svc := setupTestSvc(t)
+
+	if _, err := svc.Register(RegisterInput{
+		Name: "Mixed", Email: "  Me@Example.COM ", Password: "password123",
+	}); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	for _, attempt := range []string{"me@example.com", "ME@EXAMPLE.COM", " me@example.com  "} {
+		if _, err := svc.Login(LoginInput{Email: attempt, Password: "password123"}); err != nil {
+			t.Errorf("login with %q failed: %v", attempt, err)
+		}
+	}
+}
+
+func TestRegister_DuplicateIgnoresCase(t *testing.T) {
+	svc := setupTestSvc(t)
+
+	if _, err := svc.Register(RegisterInput{Name: "One", Email: "dup@example.com", Password: "password123"}); err != nil {
+		t.Fatalf("first register failed: %v", err)
+	}
+	if _, err := svc.Register(RegisterInput{Name: "Two", Email: "DUP@Example.com", Password: "password456"}); err == nil {
+		t.Error("a differently-cased duplicate must be rejected, not shadow the original")
+	}
+}
+
+func TestRegister_RejectsShortPassword(t *testing.T) {
+	svc := setupTestSvc(t)
+	if _, err := svc.Register(RegisterInput{Name: "S", Email: "s@example.com", Password: "short"}); err == nil {
+		t.Error("a 5-character password should be rejected at the service layer too")
+	}
+}
+
+// A Google account has no password hash. Reporting "invalid email or password"
+// sends the user off to reset a password that never existed.
+func TestLogin_GoogleAccountSaysSo(t *testing.T) {
+	svc := setupTestSvc(t)
+
+	if _, err := svc.GoogleAuth("g-only", "goog@example.com", "G", ""); err != nil {
+		t.Fatalf("google auth setup failed: %v", err)
+	}
+
+	_, err := svc.Login(LoginInput{Email: "goog@example.com", Password: "anything123"})
+	if err == nil {
+		t.Fatal("password login on a Google account must fail")
+	}
+	if !strings.Contains(err.Error(), "Google") {
+		t.Errorf("error should point at Google sign-in, got: %v", err)
 	}
 }
 

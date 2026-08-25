@@ -8,6 +8,7 @@ import (
 	"github.com/IDika31/cphub/api/internal/grader"
 	"github.com/IDika31/cphub/api/internal/handler"
 	"github.com/IDika31/cphub/api/internal/middleware"
+	"github.com/IDika31/cphub/api/internal/provider/codeforces"
 	"github.com/IDika31/cphub/api/internal/repository"
 	"github.com/IDika31/cphub/api/internal/server"
 	"github.com/IDika31/cphub/api/internal/service"
@@ -47,8 +48,10 @@ func main() {
 	// Initialize grader queue
 	grader.InitQueue(cfg.Grader.MaxConcurrent)
 
-	// Startup check: verify compilers and firejail
+	// Startup check: verify compilers and firejail, then measure sandbox
+	// overhead so it is not charged against a submission time limit.
 	_ = grader.StartupCheck()
+	grader.SetTuning(cfg.Grader.TimeGraceMS, cfg.Grader.SandboxOverheadMS)
 
 	// Repositories
 	_ = repository.NewUserRepository(db) // used by handlers via direct DB access
@@ -61,20 +64,22 @@ func main() {
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	graderHandler := handler.NewGraderHandler(cfg.Grader, grader.GetQueue(), db)
-	syncHandler := handler.NewSyncHandler(problemRepo, submissionRepo)
-	problemHandler := handler.NewProblemHandler(problemRepo)
+	syncHandler := handler.NewSyncHandler(problemRepo, submissionRepo, db)
+	problemHandler := handler.NewProblemHandler(problemRepo, codeforces.NewScraper())
 	submissionHandler := handler.NewSubmissionHandler(submissionRepo)
 	dashboardHandler := handler.NewDashboardHandler(db)
 	accountHandler := handler.NewAccountHandler(db, cfg.CF.ClientID, cfg.CF.ClientSecret, cfg.CF.RedirectURL)
 	settingsHandler := handler.NewSettingsHandler(db)
 	snippetHandler := handler.NewSnippetHandler(db)
+	extKeyHandler := handler.NewExtensionKeyHandler(db)
 	tlxImportHandler := handler.NewTLXImportHandler(db, problemRepo)
 	tlxSubmitHandler := handler.NewTLXSubmitHandler(db, problemRepo, submissionRepo)
 
 	// Create and start server
 	srv := server.New(server.ServerConfig{
-		Host: cfg.Server.Host,
-		Port: cfg.Server.Port,
+		Host:        cfg.Server.Host,
+		Port:        cfg.Server.Port,
+		CORSOrigins: cfg.Server.CORSOrigins,
 	})
 
 	_ = rdb
@@ -82,7 +87,7 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, tlxImportHandler, tlxSubmitHandler, cfg)
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, extKeyHandler, tlxImportHandler, tlxSubmitHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -103,6 +108,7 @@ func registerRoutes(
 	accountHandler *handler.AccountHandler,
 	settingsHandler *handler.SettingsHandler,
 	snippetHandler *handler.SnippetHandler,
+	extKeyHandler *handler.ExtensionKeyHandler,
 	tlxImportHandler *handler.TLXImportHandler,
 	tlxSubmitHandler *handler.TLXSubmitHandler,
 	cfg *config.Config,
@@ -119,21 +125,24 @@ func registerRoutes(
 			"?client_id=" + cfg.Google.ClientID +
 			"&redirect_uri=" + cfg.Google.RedirectURL +
 			"&response_type=code" +
-			"&scope=openid%20email%20profile"
+			"&scope=openid%20email%20profile" +
+			"&state=" + cfg.Server.WebBaseURL
 		return c.Redirect(redirectURL, 302)
 	})
 	auth.Get("/google/callback", authHandler.GoogleCallback)
-	auth.Get("/hmac-secret", middleware.AuthRequired(cfg.JWT), func(c *fiber.Ctx) error {
-    return c.JSON(fiber.Map{"secret": cfg.Extension.HMACSecret})
-})
+	// Extension pairing key (per account)
+	auth.Get("/hmac-secret", middleware.AuthRequired(cfg.JWT), extKeyHandler.Get)
+	auth.Post("/hmac-secret/rotate", middleware.AuthRequired(cfg.JWT), extKeyHandler.Rotate)
 	auth.Get("/me", middleware.AuthRequired(cfg.JWT), authHandler.Me)
 	auth.Post("/logout", middleware.AuthRequired(cfg.JWT), authHandler.Logout)
 
 	// Sync (HMAC protected)
 	sync := app.Group("/api/sync")
-	sync.Use(middleware.HMACVerify(cfg.Extension))
+	sync.Use(middleware.HMACVerify(database.DB))
 	sync.Post("/problem", syncHandler.SyncProblem)
 	sync.Post("/submission", syncHandler.SyncSubmission)
+	// Custom TLX hosts added in the extension become their own Connections entry.
+	sync.Post("/tlx-hosts", syncHandler.SyncTLXHosts)
 
 	// Problems (JWT protected)
 	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
@@ -161,22 +170,33 @@ func registerRoutes(
 	accounts.Delete("/:id", accountHandler.Unlink)
 	accounts.Post("/codeforces", accountHandler.LinkCodeforces)
 	accounts.Post("/tlx", accountHandler.LinkTLX)
+	// Self-hosted Judgels/TLX: same endpoints, different apiUrl.
+	accounts.Post("/tlx-custom", accountHandler.LinkTLXCustom)
 
 	// Codeforces OAuth (JWT required to link, callback is public)
 	auth.Get("/codeforces/callback", handler.HandleCodeforcesCallback(database.DB, handler.CFConfig{
 		ClientID:     cfg.CF.ClientID,
 		ClientSecret: cfg.CF.ClientSecret,
 		RedirectURL:  cfg.CF.RedirectURL,
+		WebBaseURL:   cfg.Server.WebBaseURL,
 	}))
+
+	// Extension download (public) — rebuilds the zip when the source changed.
+	if extDownloadHandler, err := handler.NewExtensionDownloadHandler(); err != nil {
+		log.Printf("[cphub] extension download disabled: %v", err)
+	} else {
+		app.Get("/api/extension/download", extDownloadHandler.Download)
+	}
 
 	// Dashboard
 	dashboard := app.Group("/api/dashboard", middleware.AuthRequired(cfg.JWT))
-		dashboard.Post("/sync-cf", dashboardHandler.SyncCF)
-		dashboard.Post("/sync-tlx", dashboardHandler.SyncTLX)
-		dashboard.Get("/overview", dashboardHandler.Overview)
-		dashboard.Get("/rating", dashboardHandler.RatingHistory)
-		dashboard.Get("/heatmap", dashboardHandler.Heatmap)
-		dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
+	dashboard.Post("/sync-cf", dashboardHandler.SyncCF)
+	dashboard.Post("/sync-tlx", dashboardHandler.SyncTLX)
+	dashboard.Get("/overview", dashboardHandler.Overview)
+	dashboard.Get("/rating", dashboardHandler.RatingHistory)
+	dashboard.Get("/activity", dashboardHandler.Activity)
+	dashboard.Get("/heatmap", dashboardHandler.Heatmap)
+	dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
 
 	// Settings
 	settingsGroup := app.Group("/api/settings", middleware.AuthRequired(cfg.JWT))

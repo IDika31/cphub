@@ -1,3 +1,5 @@
+import { wsBase } from "@/lib/api/client";
+
 type WSCallback = (data: unknown) => void;
 
 let ws: WebSocket | null = null;
@@ -6,7 +8,7 @@ const listeners: Map<string, WSCallback[]> = new Map();
 export function connectGraderWebSocket(runId?: string): WebSocket {
   if (ws?.readyState === WebSocket.OPEN) return ws;
 
-  const url = "ws://localhost:3001/api/grader/ws";
+  const url = `${wsBase()}/api/grader/ws`;
   ws = new WebSocket(url);
 
   ws.onopen = () => {

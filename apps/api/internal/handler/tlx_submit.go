@@ -47,21 +47,37 @@ func (h *TLXSubmitHandler) SubmitTLX(c *fiber.Ctx) error {
 	} else if err := h.db.First(&problem, "problem_id = ?", input.ProblemID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Problem tidak ditemukan"})
 	}
-	if problem.Provider != "tlx" {
+	if problem.Provider != "tlx" && problem.Provider != ProviderTLXCustom {
 		return c.Status(400).JSON(fiber.Map{"error": "Submit ke TLX hanya untuk problem TLX"})
 	}
 
-	slug, alias, err := parseTLXURL(problem.URL)
+	// Judgels is the same software everywhere, so a self-hosted problem submits
+	// through the identical calls — only the API base and the stored account
+	// differ, both derived from the problem's own URL.
+	host, slug, alias, err := parseTLXURL(problem.URL)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "URL problem TLX tidak valid"})
 	}
 
 	var account model.LinkedAccount
-	if err := h.db.Where("user_id = ? AND provider = ?", uid, "tlx").First(&account).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Akun TLX belum dihubungkan — hubungkan di halaman Connections"})
+	q := h.db.Where("user_id = ? AND provider = ?", uid, problem.Provider)
+	if problem.Provider == ProviderTLXCustom {
+		q = q.Where("handle = ?", host)
+	}
+	if err := q.First(&account).Error; err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Akun " + host + " belum dihubungkan — hubungkan di halaman Connections",
+		})
 	}
 
 	client := tlx.NewClient()
+	if problem.Provider == ProviderTLXCustom {
+		apiHost := account.ProviderUserID
+		if apiHost == "" {
+			apiHost = "api." + host
+		}
+		client = tlx.NewClientFor(apiHost)
+	}
 
 	ps, err := client.GetProblemSetBySlug(slug, account.AccessToken)
 	if err != nil {
@@ -104,11 +120,11 @@ func (h *TLXSubmitHandler) SubmitTLX(c *fiber.Ctx) error {
 		}
 	}
 
-	// Record as an external submission (idempotent on provider+submissionId).
+	// Record as an external submission (idempotent per user + provider + id).
 	extSub := &model.ExternalSubmission{
 		UserID:       uid,
 		ProblemID:    problem.ID,
-		Provider:     "tlx",
+		Provider:     problem.Provider,
 		SubmissionID: sub.JID,
 		ProblemTitle: problem.Title,
 		ProblemRef:   problem.ProblemID,
