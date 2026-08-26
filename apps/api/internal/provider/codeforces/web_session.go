@@ -44,8 +44,10 @@ type WebSession struct {
 // The wall is not a TLS fingerprint: the 403 page carries cf_chl_opt with
 // cType:'managed', i.e. a Cloudflare managed challenge that wants JavaScript. A
 // Chrome ClientHello replayed with utls (both ALPN h2 and http/1.1) was measured
-// against it and still got the same 403, so that dependency was dropped again.
-// Passing this needs a real browser engine, not a better socket.
+// against it and still got the same 403. Passing it needs a real browser engine,
+// not a better socket. The client that proved this lives in
+// internal/provider/cloudflare (TestLiveCodeforces); the mirrors need none of it,
+// so this file stays on the stdlib transport.
 //
 // The mirrors are NOT a full Codeforces. Measured unauthenticated (see
 // TestLiveMirrorSurface): /enter serves the real login page, every /contest/* path
