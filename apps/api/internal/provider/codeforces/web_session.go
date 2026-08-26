@@ -77,10 +77,37 @@ func (s *WebSession) Host() string { return s.host }
 const browserCheckMarker = "browser is being checked"
 
 var (
-	csrfRe    = regexp.MustCompile(`csrf='([0-9a-f]{16,})'`)
-	handleRe  = regexp.MustCompile(`handle\s*=\s*"([^"]+)"`)
-	errSpanRe = regexp.MustCompile(`error[a-zA-Z_\-\ ]*">(.*?)</span>`)
+	csrfRe   = regexp.MustCompile(`csrf='([0-9a-f]{16,})'`)
+	handleRe = regexp.MustCompile(`handle\s*=\s*"([^"]+)"`)
+	// Codeforces reports a rejected form in an element whose class merely CONTAINS
+	// "error", and it is a div rather than a span:
+	//   <div class="subscription-row error ">Invalid handle/email or password</div>
+	// The old span-only pattern matched none of that, so every rejection fell
+	// through to a generic "wrong password, or the page changed" guess and the real
+	// message never reached the user. Measured against m1 (TestLiveLoginDiagnostic).
+	errSpanRe = regexp.MustCompile(`(?is)<(?:span|div)[^>]*class="[^"]*\berror\b[^"]*"[^>]*>(.*?)</(?:span|div)>`)
+	// A logout link exists only on a logged-in page, which makes it the reliable
+	// signal that a login worked; the profile link beside it carries the handle.
+	// Profile links also appear in the recent-actions sidebar of anonymous pages,
+	// so the logout link has to gate them.
+	logoutRe  = regexp.MustCompile(`href="/logout[^"]*"`)
+	profileRe = regexp.MustCompile(`href="/profile/([^"/?]+)"`)
 )
+
+// loggedInHandle reports who a page belongs to, or "" when it is not a logged-in
+// page. Two markers because the JS handle variable is not on every template, and
+// the mirrors do not always ship the same one as the main host.
+func loggedInHandle(body string) string {
+	if m := handleRe.FindStringSubmatch(body); m != nil && m[1] != "" {
+		return m[1]
+	}
+	if logoutRe.MatchString(body) {
+		if m := profileRe.FindStringSubmatch(body); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
 
 // powPrefix and powHash are what the mirror's own script computes: the smallest
 // counter whose SHA-1, taken over "<counter>_<salt>", starts with four zeros.

@@ -524,7 +524,7 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 	subs, err := FetchCFSubmissions(handle, 2000)
 	if err != nil {
 		log.Printf("[sync-cf] fetch failed for %s: %v", handle, err)
-		return c.Status(502).JSON(fiber.Map{"error": "Codeforces API error: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Codeforces API error: " + err.Error()})
 	}
 
 	newProblems, newSubs := 0, 0
@@ -731,7 +731,7 @@ func (h *DashboardHandler) SyncTLX(c *fiber.Ctx) error {
 	}
 
 	if totalFetched == 0 && firstFailure != nil {
-		return c.Status(502).JSON(fiber.Map{"error": "TLX API error: " + firstFailure.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "TLX API error: " + firstFailure.Error()})
 	}
 
 	out := fiber.Map{

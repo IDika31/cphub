@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	BaseURL    = "https://codeforces.com/api"
-	OAuthURL   = "https://codeforces.com/oauth/authorize"
-	TokenURL   = "https://codeforces.com/oauth/token"
+	BaseURL  = "https://codeforces.com/api"
+	OAuthURL = "https://codeforces.com/oauth/authorize"
+	TokenURL = "https://codeforces.com/oauth/token"
 )
 
 type Client struct {
@@ -36,9 +36,9 @@ type UserInfo struct {
 }
 
 type CFResponse struct {
-	Status string          `json:"status"`
-	Result json.RawMessage `json:"result"`
-	Comment string         `json:"comment"`
+	Status  string          `json:"status"`
+	Result  json.RawMessage `json:"result"`
+	Comment string          `json:"comment"`
 }
 
 // GetUserInfo fetches Codeforces user info by handle

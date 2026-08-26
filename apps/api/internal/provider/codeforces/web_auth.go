@@ -75,14 +75,16 @@ func (s *WebSession) Login(handleOrEmail, password string) (string, error) {
 		return "", fmt.Errorf("mengirim form login: %w", err)
 	}
 
-	// The site answers a successful login by rendering the page with the handle in
-	// a script variable; a failed one keeps the form and adds an error span.
-	if m := handleRe.FindStringSubmatch(resp); m != nil && m[1] != "" {
-		s.handle = m[1]
-		return m[1], nil
+	// The site answers a successful login by rendering a logged-in page; a failed
+	// one keeps the form and adds an error element naming the reason.
+	if who := loggedInHandle(resp); who != "" {
+		s.handle = who
+		return who, nil
 	}
-	if m := errSpanRe.FindStringSubmatch(resp); m != nil && strings.TrimSpace(m[1]) != "" {
-		return "", fmt.Errorf("Codeforces menolak login: %s", strings.TrimSpace(m[1]))
+	if m := errSpanRe.FindStringSubmatch(resp); m != nil {
+		if msg := strings.TrimSpace(htmlText(m[1])); msg != "" {
+			return "", fmt.Errorf("Codeforces menolak login: %s", msg)
+		}
 	}
 	return "", fmt.Errorf("login gagal — handle/password salah, atau Codeforces mengubah halamannya")
 }
@@ -94,10 +96,7 @@ func (s *WebSession) LoggedInHandle() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if m := handleRe.FindStringSubmatch(body); m != nil {
-		return m[1], nil
-	}
-	return "", nil
+	return loggedInHandle(body), nil
 }
 
 func (s *WebSession) postForm(path string, form url.Values) (string, error) {

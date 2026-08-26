@@ -57,7 +57,11 @@ func (h *CFWebHandler) Login(c *fiber.Ctx) error {
 	handle, err := session.Login(in.Handle, in.Password)
 	if err != nil {
 		log.Printf("[cf-web] login failed for %s: %v", in.Handle, err)
-		return c.Status(502).JSON(fiber.Map{"error": err.Error()})
+		// 401, not 502: this deployment sits behind Cloudflare, which replaces an
+		// origin 5xx body with its own "Bad gateway" page, so the reason for the
+		// failure never reaches the browser. Every Codeforces-side refusal in this
+		// file therefore answers in the 4xx range, where the JSON survives.
+		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	blob, err := session.Export()

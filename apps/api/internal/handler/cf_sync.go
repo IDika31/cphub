@@ -42,7 +42,7 @@ func (h *CFSyncHandler) SyncProblemset(c *fiber.Ctx) error {
 	problems, _, err := h.api.ProblemsetProblems(c.Query("tags"))
 	if err != nil {
 		log.Printf("[cf-sync] problemset fetch failed: %v", err)
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil problemset Codeforces: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil problemset Codeforces: " + err.Error()})
 	}
 
 	rows := make([]model.Problem, 0, len(problems))
@@ -94,7 +94,7 @@ func (h *CFSyncHandler) SyncContests(c *fiber.Ctx) error {
 	list, err := h.api.ContestList(gym)
 	if err != nil {
 		log.Printf("[cf-sync] contest.list failed: %v", err)
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil daftar contest: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil daftar contest: " + err.Error()})
 	}
 
 	now := time.Now()
@@ -185,7 +185,7 @@ func (h *CFSyncHandler) SyncContestProblems(c *fiber.Ctx) error {
 	problems, contest, err := h.api.ContestProblems(id)
 	if err != nil {
 		log.Printf("[cf-sync] contest.standings %d failed: %v", id, err)
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil problem contest: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil problem contest: " + err.Error()})
 	}
 
 	now := time.Now()

@@ -54,7 +54,7 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 
 	langs, err := session.LanguageOptions(contestID)
 	if err != nil {
-		return c.Status(502).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": err.Error()})
 	}
 	langID, err := pickLanguage(langs, in.Language)
 	if err != nil {
@@ -70,7 +70,7 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 
 	if err := session.Submit(contestID, index, langID, in.SourceCode); err != nil {
 		log.Printf("[cf-web] submit %s failed: %v", problem.ProblemID, err)
-		return c.Status(502).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	verdict, subID, runtime, memory := h.pollVerdict(account.Handle, problem.ProblemID, lastID)
@@ -151,7 +151,7 @@ func (h *CFWebHandler) Register(c *fiber.Ctx) error {
 	}
 	if err := session.RegisterContest(contestID); err != nil {
 		log.Printf("[cf-web] register contest %d failed: %v", contestID, err)
-		return c.Status(502).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	log.Printf("[cf-web] %s registered for contest %d", account.Handle, contestID)

@@ -85,9 +85,9 @@ func (h *TLXImportHandler) ImportTLX(c *fiber.Ctx) error {
 	if err != nil {
 		log.Printf("[tlx-import] GetProblemSetBySlug failed (%s): %v", slug, err)
 		if strings.Contains(err.Error(), "HTTP 401") || strings.Contains(err.Error(), "HTTP 403") {
-			return c.Status(502).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang akun di Connections"})
+			return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang akun di Connections"})
 		}
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil data problemset TLX: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil data problemset TLX: " + err.Error()})
 	}
 
 	ws, err := tlxClient.GetWorksheet(ps.JID, alias, account.AccessToken)
@@ -97,9 +97,9 @@ func (h *TLXImportHandler) ImportTLX(c *fiber.Ctx) error {
 			return c.Status(404).JSON(fiber.Map{"error": "Problem tidak ditemukan di TLX"})
 		}
 		if strings.Contains(err.Error(), "HTTP 401") || strings.Contains(err.Error(), "HTTP 403") {
-			return c.Status(502).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang akun di Connections"})
+			return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang akun di Connections"})
 		}
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil worksheet TLX: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil worksheet TLX: " + err.Error()})
 	}
 
 	problemID := slug + "-" + alias

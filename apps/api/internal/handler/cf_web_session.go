@@ -69,7 +69,7 @@ func (h *CFWebHandler) Languages(c *fiber.Ctx) error {
 	}
 	langs, err := session.LanguageOptions(contestID)
 	if err != nil {
-		return c.Status(502).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"data": langs})
 }

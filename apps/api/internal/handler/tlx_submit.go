@@ -83,24 +83,24 @@ func (h *TLXSubmitHandler) SubmitTLX(c *fiber.Ctx) error {
 	if err != nil {
 		log.Printf("[tlx-submit] problemset lookup failed (%s): %v", slug, err)
 		if tlxAuthError(err) {
-			return c.Status(502).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang di Connections"})
+			return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang di Connections"})
 		}
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil data problemset TLX"})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil data problemset TLX"})
 	}
 
 	ws, err := client.GetWorksheet(ps.JID, alias, account.AccessToken)
 	if err != nil || ws.ProblemJid == "" {
 		log.Printf("[tlx-submit] worksheet/problemJid failed (%s/%s): %v", ps.JID, alias, err)
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil problemJid TLX"})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil problemJid TLX"})
 	}
 
 	sub, err := client.Submit(ps.JID, ws.ProblemJid, input.Language, input.SourceCode, account.AccessToken)
 	if err != nil {
 		log.Printf("[tlx-submit] submit failed: %v", err)
 		if tlxAuthError(err) {
-			return c.Status(502).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang di Connections"})
+			return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Token TLX kedaluwarsa — hubungkan ulang di Connections"})
 		}
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal submit ke TLX: " + err.Error()})
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal submit ke TLX: " + err.Error()})
 	}
 
 	// Poll verdict (TLX grades async). ~30s budget.
