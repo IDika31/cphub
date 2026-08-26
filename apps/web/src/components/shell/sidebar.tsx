@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, Suspense } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
@@ -89,14 +90,14 @@ function SidebarInner({ onNavigate }: SidebarProps) {
         {!collapsed ? (
           <Link href="/dashboard" onClick={onNavigate} className="flex items-center gap-2">
             {/* Served from public/, so the path resolves — src/app/icon.png is
-                only wired up as the favicon and 404s as a plain <img> src. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon.png" alt="" aria-hidden="true" className="w-6 h-6 rounded-[6px]" />
+                only wired up as the favicon and 404s as a plain src. Unoptimized
+                because the server has no sharp and a 24px icon has nothing to
+                gain from the optimizer. */}
+            <Image src="/icon.png" alt="" aria-hidden="true" width={24} height={24} unoptimized className="w-6 h-6 rounded-[6px]" />
             <span className="text-[16px] font-semibold text-[#a78bfa]">CPHub</span>
           </Link>
         ) : (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src="/icon.png" alt="CPHub" className="w-6 h-6 rounded-[6px] mx-auto" />
+          <Image src="/icon.png" alt="CPHub" width={24} height={24} unoptimized className="w-6 h-6 rounded-[6px] mx-auto" />
         )}
         <button
           onClick={toggleCollapsed}
