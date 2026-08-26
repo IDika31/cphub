@@ -40,8 +40,8 @@ func TestLiveLoginDiagnostic(t *testing.T) {
 	}
 	t.Logf("login reply: bytes=%d markers=%s", len(resp), pageMarkers(resp))
 
-	if m := handleRe.FindStringSubmatch(resp); m != nil {
-		t.Logf("SUCCESS: session belongs to %q", m[1])
+	if who := loggedInHandle(resp); who != "" {
+		t.Logf("SUCCESS: session belongs to %q", who)
 		return
 	}
 	if m := errSpanRe.FindStringSubmatch(resp); m != nil {
@@ -118,8 +118,8 @@ func pageMarkers(body string) string {
 	if csrfRe.MatchString(body) {
 		marks = append(marks, "CSRF")
 	}
-	if handleRe.MatchString(body) {
-		marks = append(marks, "HANDLE-VAR")
+	if who := loggedInHandle(body); who != "" {
+		marks = append(marks, "LOGGED-IN-AS-"+who)
 	}
 	return strings.Join(marks, " ")
 }

@@ -77,8 +77,7 @@ func (s *WebSession) Host() string { return s.host }
 const browserCheckMarker = "browser is being checked"
 
 var (
-	csrfRe   = regexp.MustCompile(`csrf='([0-9a-f]{16,})'`)
-	handleRe = regexp.MustCompile(`handle\s*=\s*"([^"]+)"`)
+	csrfRe = regexp.MustCompile(`csrf='([0-9a-f]{16,})'`)
 	// Codeforces reports a rejected form in an element whose class merely CONTAINS
 	// "error", and it is a div rather than a span:
 	//   <div class="subscription-row error ">Invalid handle/email or password</div>
@@ -86,20 +85,32 @@ var (
 	// through to a generic "wrong password, or the page changed" guess and the real
 	// message never reached the user. Measured against m1 (TestLiveLoginDiagnostic).
 	errSpanRe = regexp.MustCompile(`(?is)<(?:span|div)[^>]*class="[^"]*\berror\b[^"]*"[^>]*>(.*?)</(?:span|div)>`)
-	// A logout link exists only on a logged-in page, which makes it the reliable
-	// signal that a login worked; the profile link beside it carries the handle.
-	// Profile links also appear in the recent-actions sidebar of anonymous pages,
-	// so the logout link has to gate them.
-	logoutRe  = regexp.MustCompile(`href="/logout[^"]*"`)
+	// The header box that says who is signed in. On the mirrors the handle sits in
+	// it as bare text beside a logout link; the main host wraps it in a profile
+	// link instead.
+	enterBoxRe = regexp.MustCompile(`(?is)<div class="enter-or-register-box">(.*?)</div>`)
+	// A logout link exists only on a logged-in page, which makes it the one
+	// trustworthy signal. Profile links appear in anonymous sidebars too, so they
+	// never stand on their own.
+	logoutRe  = regexp.MustCompile(`(?i)class="logout"|href="/logout`)
 	profileRe = regexp.MustCompile(`href="/profile/([^"/?]+)"`)
 )
 
-// loggedInHandle reports who a page belongs to, or "" when it is not a logged-in
-// page. Two markers because the JS handle variable is not on every template, and
-// the mirrors do not always ship the same one as the main host.
+// loggedInHandle reports who a page belongs to, or "" when nobody is signed in.
+//
+// Deliberately NOT matched: the old `handle\s*=\s*"..."` pattern. Codeforces
+// renders rated users as <a ... data-handle="tourist">, which that pattern happily
+// reads as a logged-in session belonging to whoever appeared in the sidebar.
 func loggedInHandle(body string) string {
-	if m := handleRe.FindStringSubmatch(body); m != nil && m[1] != "" {
-		return m[1]
+	if m := enterBoxRe.FindStringSubmatch(body); m != nil && logoutRe.MatchString(m[1]) {
+		box := m[1]
+		if p := profileRe.FindStringSubmatch(box); p != nil {
+			return p[1]
+		}
+		// The mirror shape: " IDika | <a class="logout" href="/logout">Logout</a> ".
+		if name := htmlText(strings.SplitN(box, "|", 2)[0]); name != "" {
+			return name
+		}
 	}
 	if logoutRe.MatchString(body) {
 		if m := profileRe.FindStringSubmatch(body); m != nil {
