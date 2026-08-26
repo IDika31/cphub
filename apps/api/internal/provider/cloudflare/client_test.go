@@ -108,7 +108,7 @@ func TestDoSolvesIUAM(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(Options{})
+	c, err := New(Options{Browser: Chrome, Stealth: StealthOptions{Disabled: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +123,8 @@ func TestDoSolvesIUAM(t *testing.T) {
 	if want := wantAnswer(strings.Split(host, ":")[0]); submitted != want {
 		t.Errorf("jschl_answer = %q, want %q", submitted, want)
 	}
-	if !strings.Contains(agent, "Chrome/131") {
-		t.Errorf("browser headers not applied, User-Agent = %q", agent)
+	if want := c.Browser().Headers["User-Agent"]; agent != want {
+		t.Errorf("browser headers not applied: server saw %q, client sends %q", agent, want)
 	}
 	// Three visits, as a browser would make: the challenge, the redirect the
 	// answer lands on, and the re-sent original request.
@@ -161,7 +161,7 @@ func TestManagedChallengeNeedsSolver(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	bare, err := New(Options{MaxAttempts: 2})
+	bare, err := New(Options{MaxAttempts: 2, Stealth: StealthOptions{Disabled: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestManagedChallengeNeedsSolver(t *testing.T) {
 	}
 
 	solver := &fakeSolver{}
-	withSolver, err := New(Options{Solver: solver})
+	withSolver, err := New(Options{Solver: solver, Stealth: StealthOptions{Disabled: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

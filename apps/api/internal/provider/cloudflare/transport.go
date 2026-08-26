@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -79,23 +80,31 @@ func (b Browser) applyHeaders(req *http.Request) {
 // connections it made itself, so a utls conn that negotiated h2 would be fed
 // HTTP/1.1 bytes and the server would answer with SETTINGS frames that the h1
 // parser reports as a malformed response. Measured against Codeforces: m1 speaks
-// only HTTP/1.1, m3 speaks h2, so both cases are live even inside one host list.
+// only HTTP/1.1, m3 speaks h2, so both cases are live inside one host list.
 type transport struct {
-	browser Browser
 	h1      *http.Transport
 	h2      *http2.Transport
+	proxies *ProxyManager
 
-	mu    sync.Mutex
-	proto map[string]string // authority -> negotiated ALPN
+	mu      sync.Mutex
+	browser Browser
+	proto   map[string]string // authority -> negotiated ALPN
 }
 
-func newTransport(b Browser, timeout time.Duration) *transport {
-	t := &transport{browser: b, proto: map[string]string{}}
+func newTransport(b Browser, timeout time.Duration, proxies *ProxyManager) *transport {
+	t := &transport{browser: b, proxies: proxies, proto: map[string]string{}}
 	t.h1 = &http.Transport{
 		DialTLSContext:      t.dial([]string{"http/1.1"}),
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: timeout,
+	}
+	if !proxies.Empty() {
+		// Rotation is per connection, so a pooled connection would pin a whole
+		// conversation to one proxy. Closing each connection is what makes
+		// per-request rotation — and per-request success reporting — real.
+		t.h1.Proxy = func(*http.Request) (*url.URL, error) { return t.proxies.Next(), nil }
+		t.h1.DisableKeepAlives = true
 	}
 	t.h2 = &http2.Transport{
 		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
@@ -103,6 +112,22 @@ func newTransport(b Browser, timeout time.Duration) *transport {
 		},
 	}
 	return t
+}
+
+func (t *transport) setBrowser(b Browser) {
+	t.mu.Lock()
+	t.browser = b
+	t.mu.Unlock()
+	// A new fingerprint on old connections would keep the previous hello, so the
+	// pool goes with it.
+	t.h1.CloseIdleConnections()
+	t.h2.CloseIdleConnections()
+}
+
+func (t *transport) hello() utls.ClientHelloID {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.browser.Hello
 }
 
 func (t *transport) dial(alpn []string) func(context.Context, string, string) (net.Conn, error) {
@@ -117,10 +142,10 @@ func (t *transport) dial(alpn []string) func(context.Context, string, string) (n
 		}
 		// NextProtos narrows the preset's ALPN list to the one protocol this
 		// transport can speak; every other byte of the hello stays the browser's.
-		conn := utls.UClient(raw, &utls.Config{ServerName: host, NextProtos: alpn}, t.browser.Hello)
+		conn := utls.UClient(raw, &utls.Config{ServerName: host, NextProtos: alpn}, t.hello())
 		if err := conn.HandshakeContext(ctx); err != nil {
 			raw.Close()
-			return nil, fmt.Errorf("tls handshake with %s hello: %w", t.browser.Name, err)
+			return nil, fmt.Errorf("tls handshake: %w", err)
 		}
 		return conn, nil
 	}
@@ -131,11 +156,11 @@ func (t *transport) dial(alpn []string) func(context.Context, string, string) (n
 // wrong on every request.
 func (t *transport) negotiated(ctx context.Context, authority string) (string, error) {
 	t.mu.Lock()
-	if p, ok := t.proto[authority]; ok {
-		t.mu.Unlock()
+	p, known := t.proto[authority]
+	t.mu.Unlock()
+	if known {
 		return p, nil
 	}
-	t.mu.Unlock()
 
 	conn, err := t.dial([]string{"h2", "http/1.1"})(ctx, "tcp", authority)
 	if err != nil {
@@ -143,8 +168,8 @@ func (t *transport) negotiated(ctx context.Context, authority string) (string, e
 	}
 	proto := "http/1.1"
 	if u, ok := conn.(*utls.UConn); ok {
-		if p := u.ConnectionState().NegotiatedProtocol; p != "" {
-			proto = p
+		if negotiated := u.ConnectionState().NegotiatedProtocol; negotiated != "" {
+			proto = negotiated
 		}
 	}
 	conn.Close()
@@ -156,12 +181,17 @@ func (t *transport) negotiated(ctx context.Context, authority string) (string, e
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		return http.DefaultTransport.RoundTrip(req)
+	}
+	// A proxy pins the client to HTTP/1.1: x/net/http2 has no proxy support, and
+	// tunnelling h2 through CONNECT ourselves would buy nothing here.
+	if !t.proxies.Empty() {
+		return t.h1.RoundTrip(req)
+	}
 	authority := req.URL.Host
 	if req.URL.Port() == "" {
 		authority = net.JoinHostPort(authority, "443")
-	}
-	if req.URL.Scheme != "https" {
-		return http.DefaultTransport.RoundTrip(req)
 	}
 	proto, err := t.negotiated(req.Context(), authority)
 	if err != nil {

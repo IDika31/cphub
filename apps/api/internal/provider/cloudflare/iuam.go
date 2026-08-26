@@ -131,7 +131,7 @@ func (c *Client) iuamDelayFor(body string) time.Duration {
 			return time.Duration(ms) * time.Millisecond
 		}
 	}
-	return c.iuamDelay
+	return c.opts.IUAMDelay
 }
 
 // formInputs collects the challenge form's own inputs (r, jschl_vc, pass, md)
