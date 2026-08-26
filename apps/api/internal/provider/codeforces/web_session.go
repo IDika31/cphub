@@ -159,46 +159,59 @@ func (s *WebSession) powCookie(u *url.URL) (string, bool) {
 // cookie must survive that round trip: without JSESSIONID the server treats the
 // answer as unsolicited and issues a fresh puzzle instead of the page.
 func (s *WebSession) get(path string) (string, error) {
-	body, err := s.rawGet(path)
+	body, _, err := s.getPage(path)
+	return body, err
+}
+
+// getPage is get plus the status code, for callers that have to tell "this host
+// does not serve this path" apart from "the session died" — the mirrors answer 404
+// for whole sections of the site, and reporting that as an expired session sends
+// the user off to log in again for nothing.
+func (s *WebSession) getPage(path string) (string, int, error) {
+	body, status, err := s.rawGet(path)
 	if err != nil {
-		return "", err
+		return "", status, err
 	}
 	if !strings.Contains(body, browserCheckMarker) {
-		return body, nil
+		return body, status, nil
 	}
 
 	u, err := url.Parse(s.host + path)
 	if err != nil {
-		return "", err
+		return "", status, err
 	}
 	salt, ok := s.powCookie(u)
 	if !ok {
-		return "", fmt.Errorf("browser check served without a pow cookie")
+		return "", status, fmt.Errorf("browser check served without a pow cookie")
 	}
 	answer, err := solvePOW(salt)
 	if err != nil {
-		return "", err
+		return "", status, err
 	}
 	s.http.Jar.SetCookies(u, []*http.Cookie{{Name: "pow", Value: answer, Path: "/"}})
 
-	body, err = s.rawGet(path)
+	body, status, err = s.rawGet(path)
 	if err != nil {
-		return "", err
+		return "", status, err
 	}
 	if strings.Contains(body, browserCheckMarker) {
-		return "", fmt.Errorf("browser check still served after solving it")
+		return "", status, fmt.Errorf("browser check still served after solving it")
 	}
-	return body, nil
+	return body, status, nil
 }
 
-func (s *WebSession) rawGet(path string) (string, error) {
-	var lastErr error
+func (s *WebSession) rawGet(path string) (string, int, error) {
+	var (
+		lastErr    error
+		lastBody   string
+		lastStatus int
+	)
 	// The host that answered last time goes first: otherwise every request pays a
 	// wasted round trip to a host that is currently walled off.
 	for _, host := range s.orderedHosts() {
 		req, err := http.NewRequest(http.MethodGet, host+path, nil)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		setBrowserHeaders(req)
 		resp, err := s.http.Do(req)
@@ -216,6 +229,12 @@ func (s *WebSession) rawGet(path string) (string, error) {
 			lastErr = fmt.Errorf("%s%s: HTTP %d", host, path, resp.StatusCode)
 			continue
 		}
+		// The mirrors carry only part of the site, so a 404 is about this host and
+		// not about the path: try the others before giving up on it.
+		if resp.StatusCode == http.StatusNotFound {
+			lastBody, lastStatus, lastErr = string(body), resp.StatusCode, nil
+			continue
+		}
 		// A Cloudflare interstitial arrives as 403 with a JS challenge — no cookie
 		// we can compute answers it, so the host is simply unusable right now.
 		if resp.StatusCode == http.StatusForbidden || isCloudflareWall(string(body)) {
@@ -223,9 +242,30 @@ func (s *WebSession) rawGet(path string) (string, error) {
 			continue
 		}
 		s.host = host
-		return string(body), nil
+		return string(body), resp.StatusCode, nil
 	}
-	return "", lastErr
+	// Every host 404'd: that is an answer, not a transport failure, so it goes back
+	// as a body the caller can explain rather than as an error it cannot.
+	if lastStatus == http.StatusNotFound {
+		return lastBody, lastStatus, nil
+	}
+	return "", lastStatus, lastErr
+}
+
+// describeMissingForm explains why a page did not carry the form that was expected,
+// instead of blaming the session for everything. The three cases look identical in
+// the body but mean entirely different things to the user.
+func (s *WebSession) describeMissingForm(path, body string, status int) error {
+	switch {
+	case status == http.StatusNotFound:
+		return fmt.Errorf("%s tidak dilayani oleh mirror mana pun (HTTP 404) — mirror Codeforces hanya membawa kontes yang sedang berjalan, bukan arsip/practice", path)
+	case strings.Contains(body, `name="handleOrEmail"`):
+		return fmt.Errorf("sesi Codeforces kedaluwarsa — login ulang di halaman Connections")
+	case strings.Contains(body, browserCheckMarker):
+		return fmt.Errorf("browser check Codeforces belum terlewati untuk %s", path)
+	default:
+		return fmt.Errorf("halaman %s tidak dikenali (HTTP %d, %d byte) — Codeforces kemungkinan mengubah halamannya", path, status, len(body))
+	}
 }
 
 // orderedHosts puts the last host that answered at the front, keeping the rest in

@@ -27,13 +27,14 @@ type Language struct {
 // LanguageOptions lists what the account may submit in. It doubles as a session
 // check: the dropdown only renders for a logged-in user.
 func (s *WebSession) LanguageOptions(contestID int) ([]Language, error) {
-	body, err := s.get(fmt.Sprintf("/contest/%d/submit", contestID))
+	path := fmt.Sprintf("/contest/%d/submit", contestID)
+	body, status, err := s.getPage(path)
 	if err != nil {
 		return nil, err
 	}
 	block := langSelectRe.FindString(body)
 	if block == "" {
-		return nil, fmt.Errorf("dropdown bahasa tidak ada di halaman submit — sesi Codeforces kemungkinan sudah kedaluwarsa")
+		return nil, s.describeMissingForm(path, body, status)
 	}
 	var langs []Language
 	for _, m := range langOptionRe.FindAllStringSubmatch(block, -1) {
@@ -57,13 +58,13 @@ func (s *WebSession) LanguageOptions(contestID int) ([]Language, error) {
 // ends up compiled as the wrong language.
 func (s *WebSession) Submit(contestID int, problemIndex, programTypeID, source string) error {
 	path := fmt.Sprintf("/contest/%d/submit", contestID)
-	body, err := s.get(path)
+	body, status, err := s.getPage(path)
 	if err != nil {
 		return err
 	}
 	csrf := csrfRe.FindStringSubmatch(body)
 	if csrf == nil {
-		return fmt.Errorf("csrf token tidak ditemukan di halaman submit — sesi kedaluwarsa?")
+		return s.describeMissingForm(path, body, status)
 	}
 
 	form := url.Values{
@@ -115,7 +116,7 @@ func submitOutcome(resp string) error {
 // nothing while looking like it worked.
 func (s *WebSession) RegisterContest(contestID int) error {
 	path := fmt.Sprintf("/contestRegistration/%d", contestID)
-	body, err := s.get(path)
+	body, status, err := s.getPage(path)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func (s *WebSession) RegisterContest(contestID int) error {
 	}
 	csrf := csrfRe.FindStringSubmatch(body)
 	if csrf == nil {
-		return fmt.Errorf("csrf token tidak ditemukan di halaman registrasi — sesi kedaluwarsa, atau registrasi belum/sudah tidak dibuka")
+		return s.describeMissingForm(path, body, status)
 	}
 
 	form := url.Values{
