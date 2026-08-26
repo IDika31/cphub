@@ -159,7 +159,7 @@ func (s *WebSession) powCookie(u *url.URL) (string, bool) {
 // cookie must survive that round trip: without JSESSIONID the server treats the
 // answer as unsolicited and issues a fresh puzzle instead of the page.
 func (s *WebSession) get(path string) (string, error) {
-	body, _, err := s.getPage(path)
+	body, _, _, err := s.getPage(path)
 	return body, err
 }
 
@@ -167,51 +167,52 @@ func (s *WebSession) get(path string) (string, error) {
 // does not serve this path" apart from "the session died" — the mirrors answer 404
 // for whole sections of the site, and reporting that as an expired session sends
 // the user off to log in again for nothing.
-func (s *WebSession) getPage(path string) (string, int, error) {
-	body, status, err := s.rawGet(path)
+func (s *WebSession) getPage(path string) (body string, status int, landed string, err error) {
+	body, status, landed, err = s.rawGet(path)
 	if err != nil {
-		return "", status, err
+		return "", status, landed, err
 	}
 	if !strings.Contains(body, browserCheckMarker) {
-		return body, status, nil
+		return body, status, landed, nil
 	}
 
 	u, err := url.Parse(s.host + path)
 	if err != nil {
-		return "", status, err
+		return "", status, landed, err
 	}
 	salt, ok := s.powCookie(u)
 	if !ok {
-		return "", status, fmt.Errorf("browser check served without a pow cookie")
+		return "", status, landed, fmt.Errorf("browser check served without a pow cookie")
 	}
 	answer, err := solvePOW(salt)
 	if err != nil {
-		return "", status, err
+		return "", status, landed, err
 	}
 	s.http.Jar.SetCookies(u, []*http.Cookie{{Name: "pow", Value: answer, Path: "/"}})
 
-	body, status, err = s.rawGet(path)
+	body, status, landed, err = s.rawGet(path)
 	if err != nil {
-		return "", status, err
+		return "", status, landed, err
 	}
 	if strings.Contains(body, browserCheckMarker) {
-		return "", status, fmt.Errorf("browser check still served after solving it")
+		return "", status, landed, fmt.Errorf("browser check still served after solving it")
 	}
-	return body, status, nil
+	return body, status, landed, nil
 }
 
-func (s *WebSession) rawGet(path string) (string, int, error) {
+func (s *WebSession) rawGet(path string) (string, int, string, error) {
 	var (
 		lastErr    error
 		lastBody   string
 		lastStatus int
+		lastLanded string
 	)
 	// The host that answered last time goes first: otherwise every request pays a
 	// wasted round trip to a host that is currently walled off.
 	for _, host := range s.orderedHosts() {
 		req, err := http.NewRequest(http.MethodGet, host+path, nil)
 		if err != nil {
-			return "", 0, err
+			return "", 0, "", err
 		}
 		setBrowserHeaders(req)
 		resp, err := s.http.Do(req)
@@ -232,7 +233,7 @@ func (s *WebSession) rawGet(path string) (string, int, error) {
 		// The mirrors carry only part of the site, so a 404 is about this host and
 		// not about the path: try the others before giving up on it.
 		if resp.StatusCode == http.StatusNotFound {
-			lastBody, lastStatus, lastErr = string(body), resp.StatusCode, nil
+			lastBody, lastStatus, lastLanded, lastErr = string(body), resp.StatusCode, landingPath(resp), nil
 			continue
 		}
 		// A Cloudflare interstitial arrives as 403 with a JS challenge — no cookie
@@ -242,25 +243,37 @@ func (s *WebSession) rawGet(path string) (string, int, error) {
 			continue
 		}
 		s.host = host
-		return string(body), resp.StatusCode, nil
+		return string(body), resp.StatusCode, landingPath(resp), nil
 	}
 	// Every host 404'd: that is an answer, not a transport failure, so it goes back
 	// as a body the caller can explain rather than as an error it cannot.
 	if lastStatus == http.StatusNotFound {
-		return lastBody, lastStatus, nil
+		return lastBody, lastStatus, lastLanded, nil
 	}
-	return "", lastStatus, lastErr
+	return "", lastStatus, lastLanded, lastErr
+}
+
+// landingPath is the path the response actually came from, which differs from the
+// requested one whenever Codeforces redirected — the mirrors send any contest they
+// are not currently running back to their front page.
+func landingPath(resp *http.Response) string {
+	if resp.Request == nil || resp.Request.URL == nil {
+		return ""
+	}
+	return resp.Request.URL.Path
 }
 
 // describeMissingForm explains why a page did not carry the form that was expected,
 // instead of blaming the session for everything. The three cases look identical in
 // the body but mean entirely different things to the user.
-func (s *WebSession) describeMissingForm(path, body string, status int) error {
+func (s *WebSession) describeMissingForm(path, landed, body string, status int) error {
 	switch {
 	case status == http.StatusNotFound:
 		return fmt.Errorf("%s tidak dilayani oleh mirror mana pun (HTTP 404) — mirror Codeforces hanya membawa kontes yang sedang berjalan, bukan arsip/practice", path)
 	case strings.Contains(body, `name="handleOrEmail"`):
 		return fmt.Errorf("sesi Codeforces kedaluwarsa — login ulang di halaman Connections")
+	case landed != "" && landed != path:
+		return fmt.Errorf("%s dialihkan ke %s — kontes ini tidak tersedia di mirror %s, yang hanya membawa kontes yang sedang berjalan", path, landed, s.host)
 	case strings.Contains(body, browserCheckMarker):
 		return fmt.Errorf("browser check Codeforces belum terlewati untuk %s", path)
 	default:

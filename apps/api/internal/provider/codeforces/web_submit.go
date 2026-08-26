@@ -28,13 +28,13 @@ type Language struct {
 // check: the dropdown only renders for a logged-in user.
 func (s *WebSession) LanguageOptions(contestID int) ([]Language, error) {
 	path := fmt.Sprintf("/contest/%d/submit", contestID)
-	body, status, err := s.getPage(path)
+	body, status, landed, err := s.getPage(path)
 	if err != nil {
 		return nil, err
 	}
 	block := langSelectRe.FindString(body)
 	if block == "" {
-		return nil, s.describeMissingForm(path, body, status)
+		return nil, s.describeMissingForm(path, landed, body, status)
 	}
 	var langs []Language
 	for _, m := range langOptionRe.FindAllStringSubmatch(block, -1) {
@@ -58,13 +58,13 @@ func (s *WebSession) LanguageOptions(contestID int) ([]Language, error) {
 // ends up compiled as the wrong language.
 func (s *WebSession) Submit(contestID int, problemIndex, programTypeID, source string) error {
 	path := fmt.Sprintf("/contest/%d/submit", contestID)
-	body, status, err := s.getPage(path)
+	body, status, landed, err := s.getPage(path)
 	if err != nil {
 		return err
 	}
 	csrf := csrfRe.FindStringSubmatch(body)
 	if csrf == nil {
-		return s.describeMissingForm(path, body, status)
+		return s.describeMissingForm(path, landed, body, status)
 	}
 
 	form := url.Values{
@@ -116,7 +116,7 @@ func submitOutcome(resp string) error {
 // nothing while looking like it worked.
 func (s *WebSession) RegisterContest(contestID int) error {
 	path := fmt.Sprintf("/contestRegistration/%d", contestID)
-	body, status, err := s.getPage(path)
+	body, status, landed, err := s.getPage(path)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (s *WebSession) RegisterContest(contestID int) error {
 	}
 	csrf := csrfRe.FindStringSubmatch(body)
 	if csrf == nil {
-		return s.describeMissingForm(path, body, status)
+		return s.describeMissingForm(path, landed, body, status)
 	}
 
 	form := url.Values{
