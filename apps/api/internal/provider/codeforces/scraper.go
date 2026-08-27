@@ -3,63 +3,52 @@ package codeforces
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/google/uuid"
 )
 
-type Scraper struct {
-	httpClient *http.Client
-}
+// Scraper reads problem statements, which the official API has no method for — so
+// this is HTML, from codeforces.com itself.
+//
+// It has no transport of its own: it borrows WebSession's, which is what gets it
+// past the Cloudflare managed challenge when a browser solver is configured, and
+// what reports the wall plainly when none is. A statement fetch needs no login, so
+// the session is anonymous and short-lived.
+type Scraper struct{}
 
-func NewScraper() *Scraper {
-	return &Scraper{
-		httpClient: &http.Client{Timeout: 15 * time.Second},
-	}
-}
+func NewScraper() *Scraper { return &Scraper{} }
 
 // FetchProblem scrapes codeforces.com/problemset/problem/{contestID}/{letter}.
 func (s *Scraper) FetchProblem(contestID, letter string) (*model.Problem, error) {
-	url := fmt.Sprintf("https://codeforces.com/problemset/problem/%s/%s", contestID, letter)
+	path := fmt.Sprintf("/problemset/problem/%s/%s", contestID, letter)
+	problemID := contestID + strings.ToUpper(letter)
 
-	req, err := http.NewRequest("GET", url, nil)
+	session, err := NewWebSession()
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-
-	resp, err := s.httpClient.Do(req)
+	html, status, _, err := session.getPage(path)
 	if err != nil {
 		return nil, fmt.Errorf("CF fetch failed: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("problem %s%s not found on Codeforces", contestID, letter)
+	if status == http.StatusNotFound {
+		return nil, fmt.Errorf("problem %s not found on Codeforces", problemID)
 	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Codeforces returned HTTP %d", resp.StatusCode)
+	if isCloudflareWall(html) {
+		return nil, fmt.Errorf("problem %s: Cloudflare challenge not cleared%s", problemID, solverHint(session.viaCloudflare))
 	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body failed: %w", err)
+	// A statement that parsed to nothing means the page was served but was not the
+	// problem — a login wall or a redirect — and returning an empty problem would
+	// write that emptiness into the database.
+	problem := parseHTML(html, problemID, session.Host()+path)
+	if problem.Title == "" && problem.Statement == "" {
+		return nil, fmt.Errorf("problem %s: page carried no statement (HTTP %d, %d bytes)", problemID, status, len(html))
 	}
-
-	html := string(body)
-	if strings.Contains(html, "Just a moment") || strings.Contains(html, "cf-browser-verification") {
-		return nil, fmt.Errorf("Cloudflare challenge encountered — try again later")
-	}
-
-	problemID := contestID + strings.ToUpper(letter)
-	return parseHTML(html, problemID, url), nil
+	return problem, nil
 }
 
 func parseHTML(html, problemID, pageURL string) *model.Problem {
@@ -287,11 +276,18 @@ func extractSampleTests(html string) []model.TestCase {
 }
 
 func extractTags(html string) string {
-	re := regexp.MustCompile(`class="tag-box"[^>]*>\s*([^<]+?)\s*</a>`)
+	// Codeforces renders a tag as <span class="tag-box" title="Brute force"> brute
+	// force </span>. The closer used to be </a> — tags were links — and matching
+	// only that returned an empty list for every problem. It went unnoticed because
+	// this whole path was unreachable behind Cloudflare until the browser solver
+	// landed, so nothing ever got as far as parsing a real page. Both closers are
+	// accepted rather than swapped, in case the link form comes back.
+	re := regexp.MustCompile(`class="tag-box"[^>]*>\s*([^<]+?)\s*</(?:a|span)>`)
 	matches := re.FindAllStringSubmatch(html, -1)
 	var tags []string
 	for _, m := range matches {
 		tag := strings.TrimSpace(m[1])
+		// A leading "*" is the difficulty box (*800), not a topic tag.
 		if tag != "" && !strings.HasPrefix(tag, "*") {
 			tags = append(tags, tag)
 		}

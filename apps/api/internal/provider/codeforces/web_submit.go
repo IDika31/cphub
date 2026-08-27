@@ -114,19 +114,24 @@ func submitOutcome(resp string) error {
 // are replayed rather than guessed, because the field set differs between an
 // ordinary round and one with "extra registration", and a wrong guess registers
 // nothing while looking like it worked.
-func (s *WebSession) RegisterContest(contestID int) error {
+//
+// The bool reports that the account was ALREADY registered before this call. It is
+// worth separating from a fresh registration: both mean "you are in", but only one is
+// something this call did, and the caller shows the user a different message for each.
+// It is also the only way CPHub learns about a registration made directly on
+// codeforces.com, since no read API exposes registration state.
+func (s *WebSession) RegisterContest(contestID int) (alreadyRegistered bool, err error) {
 	path := fmt.Sprintf("/contestRegistration/%d", contestID)
 	body, status, landed, err := s.getPage(path)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if strings.Contains(body, "You have already registered") ||
-		strings.Contains(body, "already registered for the contest") {
-		return nil // idempotent: already in
+	if registeredAlreadyRe.MatchString(body) {
+		return true, nil
 	}
 	csrf := csrfRe.FindStringSubmatch(body)
 	if csrf == nil {
-		return s.describeMissingForm(path, landed, body, status)
+		return false, s.describeMissingForm(path, landed, body, status)
 	}
 
 	form := url.Values{
@@ -140,17 +145,49 @@ func (s *WebSession) RegisterContest(contestID int) error {
 			form.Set(name, value)
 		}
 	}
-	resp, err := s.postForm(path, form)
+	resp, landedPost, err := s.postFormPage(path, form)
 	if err != nil {
-		return err
+		return false, err
+	}
+	// A race with the user registering in their own browser lands here, and it is a
+	// success rather than a failure: the account is in either way.
+	if registeredAlreadyRe.MatchString(resp) {
+		return true, nil
 	}
 	if m := errSpanRe.FindStringSubmatch(resp); m != nil {
 		if msg := strings.TrimSpace(htmlText(m[1])); msg != "" {
-			return fmt.Errorf("Codeforces menolak registrasi: %s", msg)
+			return false, fmt.Errorf("Codeforces menolak registrasi: %s", msg)
 		}
 	}
-	return nil
+	// Success is asserted from a positive marker from here on, never from the absence of
+	// an error element. This used to end in `return false, nil`, which meant any reply
+	// without a recognised complaint counted as registered: CPHub then filed a
+	// registration, the contest list stopped offering the button, and the user found out
+	// they were not in the round when it started.
+	//
+	// Codeforces takes a registration by sending the browser off the form, so a reply from
+	// any other path is the marker.
+	if landedPost != "" && landedPost != path {
+		return false, nil
+	}
+	// Still on the form. Ask the page itself rather than assume either way.
+	confirm, status, landed, cErr := s.getPage(path)
+	if cErr != nil {
+		return false, fmt.Errorf("registrasi terkirim tapi hasilnya tidak bisa dipastikan: %w", cErr)
+	}
+	if registeredAlreadyRe.MatchString(confirm) {
+		return false, nil
+	}
+	if csrfRe.MatchString(confirm) {
+		return false, fmt.Errorf("Codeforces tidak mencatat registrasi — form %s masih tampil setelah dikirim", path)
+	}
+	return false, s.describeMissingForm(path, landed, confirm, status)
 }
+
+// registeredAlreadyRe matches the several ways Codeforces says "you are in this one".
+// The wording differs between an ordinary round and a contest with extra registration,
+// so this is deliberately loose rather than one exact sentence.
+var registeredAlreadyRe = regexp.MustCompile(`(?i)You have already registered|already registered for the contest|You are already registered`)
 
 // hiddenInputs collects every hidden field on a page, so a form can be replayed
 // without hardcoding its shape.

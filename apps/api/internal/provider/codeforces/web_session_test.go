@@ -11,9 +11,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IDika31/cphub/api/internal/provider/cloudflare"
 )
 
-// Golden vectors captured from the mirror's own script: each salt is one the server
+// Golden vectors captured from Codeforces' own browser-check script: each salt is one the server
 // handed out, and the counter is what the browser check itself settled on. They
 // pin the Go solver to the same answer the site expects — hash function, input
 // shape and prefix all at once.
@@ -48,12 +50,13 @@ func newTestSession(t *testing.T, srv *httptest.Server) *WebSession {
 	}
 	return &WebSession{
 		http:  &http.Client{Jar: jar, Timeout: 10 * time.Second},
+		jar:   jar,
 		hosts: []string{srv.URL},
 		host:  srv.URL,
 	}
 }
 
-// The mirror hands out a salt with the challenge and only serves the real page once
+// Codeforces hands out a salt with the challenge and only serves the real page once
 // the solved cookie comes back on the same session. Sending the answer without the
 // session cookie earns a fresh puzzle instead — that mistake cost a debugging round
 // against the live site, so the stub reproduces it.
@@ -118,7 +121,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	s := newTestSession(t, srv)
 	s.ftaa, s.bfaa, s.handle = "abc123", bfaaConstant, "IDika31"
 	u, _ := url.Parse(srv.URL)
-	s.http.Jar.SetCookies(u, []*http.Cookie{{Name: "JSESSIONID", Value: "XYZ", Path: "/"}})
+	s.jar.SetCookies(u, []*http.Cookie{{Name: "JSESSIONID", Value: "XYZ", Path: "/"}})
 
 	blob, err := s.Export()
 	if err != nil {
@@ -133,7 +136,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Errorf("restored ftaa/handle/bfaa = %q/%q/%q", restored.ftaa, restored.handle, restored.bfaa)
 	}
 	found := false
-	for _, ck := range restored.http.Jar.Cookies(u) {
+	for _, ck := range restored.jar.Cookies(u) {
 		if ck.Name == "JSESSIONID" && ck.Value == "XYZ" {
 			found = true
 		}
@@ -143,12 +146,22 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLiveMirrorLoginForm proves the whole transport against the real site without
-// credentials: solve the mirror's puzzle, reach the actual login page, find the csrf
-// token. Gated by CF_LIVE so the normal suite stays offline.
-func TestLiveMirrorLoginForm(t *testing.T) {
+// TestLiveLoginPageReachable proves the whole transport against the real site without
+// credentials: clear Cloudflare, land on the actual login page, find the csrf token.
+//
+// The re-navigation matters and is the point of the test. Clearing the challenge on
+// /enter drops the browser on / rather than back on /enter, so a client that asks once
+// and inspects what it gets is looking at the front page and concludes there is no
+// login form. Asking again — now holding clearance — is what actually reaches it.
+//
+// Gated by CF_LIVE so the normal suite stays offline.
+func TestLiveLoginPageReachable(t *testing.T) {
 	if os.Getenv("CF_LIVE") == "" {
-		t.Skip("set CF_LIVE=1 to hit the real Codeforces mirror")
+		t.Skip("set CF_LIVE=1 to hit the real Codeforces")
+	}
+	t.Cleanup(DisableBrowserSolver)
+	if _, err := EnableBrowserSolver(cloudflare.BrowserOptions{}); err != nil {
+		t.Skipf("no browser to test with: %v", err)
 	}
 	s, err := NewWebSession()
 	if err != nil {
@@ -162,12 +175,80 @@ func TestLiveMirrorLoginForm(t *testing.T) {
 	if strings.Contains(body, browserCheckMarker) {
 		t.Fatal("browser check not cleared")
 	}
+	if !strings.HasPrefix(s.Host(), "https://codeforces.com") {
+		t.Fatalf("answered by %s, wanted the main host", s.Host())
+	}
+	if !strings.Contains(body, `name="handleOrEmail"`) {
+		t.Fatalf("no login form on the page /enter returned (%d bytes) — the clearance redirect probably left us on the front page", len(body))
+	}
 	m := csrfRe.FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no csrf token on the live login page (%d bytes)", len(body))
 	}
-	if !strings.Contains(body, `name="handleOrEmail"`) {
-		t.Error("login form field handleOrEmail missing — the page may have changed")
+	t.Logf("%s /enter reached in %s, csrf=%s…", s.Host(), time.Since(started).Round(time.Millisecond), m[1][:8])
+}
+
+// The shape of a real logged-in codeforces.com page, measured 2026-08-27 via
+// TestLiveCodeforcesLoginGate: no .enter-or-register-box (that is the logged-OUT
+// header), the account's own handle beside the logout link, and rated users listed
+// further down the sidebar.
+const loggedInPage = `<div id="header">
+  <div class="lang-chooser">
+    <div><a href="/profile/IDika">IDika</a> | <a href="/logout">Logout</a></div>
+  </div>
+</div>
+<div class="sidebar">
+  <div class="rated-users"><a href="/profile/Benq">Benq</a></div>
+  <div class="rated-users"><a href="/profile/jiangly">jiangly</a></div>
+</div>`
+
+func TestLoggedInHandleAnchorsOnLogout(t *testing.T) {
+	if got := loggedInHandle(loggedInPage); got != "IDika" {
+		t.Errorf("loggedInHandle = %q, want %q", got, "IDika")
 	}
-	t.Logf("mirror %s unlocked in %s, csrf=%s…", s.Host(), time.Since(started).Round(time.Millisecond), m[1][:8])
+}
+
+// The regression this guards: with the sidebar rendered BEFORE the header, a rule that
+// takes the first /profile/ link in the body reports someone else's handle and links
+// the wrong Codeforces account. Anchoring on the logout link is what makes the order
+// irrelevant.
+func TestLoggedInHandleIgnoresSidebarUsers(t *testing.T) {
+	reordered := `<div class="sidebar">
+  <div class="rated-users"><a href="/profile/Benq">Benq</a></div>
+  <div class="rated-users"><a href="/profile/jiangly">jiangly</a></div>
+</div>
+<div id="header"><div class="lang-chooser">
+  <div><a href="/profile/IDika">IDika</a> | <a href="/logout">Logout</a></div>
+</div></div>`
+	if got := loggedInHandle(reordered); got != "IDika" {
+		t.Errorf("loggedInHandle = %q, want %q — the nearest link to the logout anchor", got, "IDika")
+	}
+}
+
+// No logout link means nobody is signed in, however many profile links the page has.
+func TestLoggedInHandleEmptyWhenAnonymous(t *testing.T) {
+	anonymous := `<div class="enter-or-register-box"><a href="/enter">Enter</a></div>
+<div class="sidebar"><a href="/profile/Benq">Benq</a></div>`
+	if got := loggedInHandle(anonymous); got != "" {
+		t.Errorf("loggedInHandle = %q, want empty — a sidebar profile link is not a session", got)
+	}
+}
+
+// The header of a real logged-in codeforces.com page, byte-for-byte as measured
+// 2026-08-27. The logout href carries a per-session token before "/logout", which is
+// what an earlier `href="/logout` pattern failed to match — so a live session read as
+// logged out and every server-side action refused to run.
+const loggedInHeaderMainHost = `<div class="lang-chooser">
+  <div style="text-align: right;">
+    <a href="/profile/IDika">IDika</a> | <a href="/58041edc1b1559849bdbdced8d68f53c/logout">Logout</a>
+  </div>
+</div>
+<div class="sidebar">
+  <a href="/profile/Benq">Benq</a><a href="/profile/jiangly">jiangly</a>
+</div>`
+
+func TestLoggedInHandleReadsTokenPrefixedLogout(t *testing.T) {
+	if got := loggedInHandle(loggedInHeaderMainHost); got != "IDika" {
+		t.Errorf("loggedInHandle = %q, want %q — the logout href is /<token>/logout, not /logout", got, "IDika")
+	}
 }

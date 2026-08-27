@@ -14,8 +14,8 @@ import (
 
 // CFWebHandler owns everything Codeforces has no API for: signing in, submitting
 // and registering. Reads stay on the official API (see CFSyncHandler); only these
-// three actions need a browser session, and they go through the m1/m3 mirrors
-// because codeforces.com itself is behind a Cloudflare challenge.
+// three actions need a browser session. Preferred path is the extension, which acts
+// in the user's own browser (see SessionFromExtension); this handler is the fallback.
 type CFWebHandler struct {
 	db  *gorm.DB
 	api *codeforces.API
@@ -101,6 +101,11 @@ func (h *CFWebHandler) Login(c *fiber.Ctx) error {
 
 	assign := map[string]interface{}{
 		"provider_user_id":   handle,
+		// handle is in here for a reason: it is what cfSession re-logs in with and what
+		// the verdict poll asks user.status about, so leaving it out meant relinking a
+		// DIFFERENT Codeforces account updated every other column and kept the old
+		// handle — and every later action then acted as the previous account.
+		"handle":             handle,
 		"provider_username":  handle,
 		"session_data":       string(blob),
 		"session_checked_at": &now,

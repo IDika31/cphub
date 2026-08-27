@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { getSetting, setSetting } from "../shared/storage";
-import { pingAPI } from "../shared/api";
+import { pingAPI, DEFAULT_API_URL, DEFAULT_WEB_URL } from "../shared/api";
 
 export default function Options() {
-  const [apiUrl, setApiUrl] = useState("http://localhost:3001");
-  const [webUrl, setWebUrl] = useState("http://localhost:3000");
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+  const [webUrl, setWebUrl] = useState(DEFAULT_WEB_URL);
   const [pairingToken, setPairingToken] = useState("");
   const [connectionStatus, setConnectionStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [saved, setSaved] = useState(false);

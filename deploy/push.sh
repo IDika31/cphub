@@ -170,10 +170,22 @@ fi
 # The Download button serves this zip, so a stale one hands users an extension
 # without the current fixes. Rebuilt on the server (vite, ~2s, negligible RAM)
 # rather than shipped, so it always matches the source that just landed.
+#
+# The URLs are baked in from this server's own .env. Without that the zip would carry
+# the source default of localhost, so every user would have to fix it by hand — and
+# until they did, the webapp bridge would never be injected into their CPHub tab, which
+# presents as "extension not detected" rather than as a setting that needs changing.
 if [ -d apps/extension ]; then
+  EXT_API_URL=\$(sed -n 's/^API_BASE_URL=//p' .env 2>/dev/null | tail -1 | tr -d "\\"'")
+  EXT_WEB_URL=\$(sed -n 's/^WEB_BASE_URL=//p' .env 2>/dev/null | tail -1 | tr -d "\\"'")
+  if [ -z "\$EXT_API_URL" ] || [ -z "\$EXT_WEB_URL" ]; then
+    echo "  WARNING: API_BASE_URL/WEB_BASE_URL missing from .env — the zip will point at localhost"
+  else
+    echo "  extension will point at \$EXT_WEB_URL"
+  fi
   ( cd apps/extension
     bun install >/dev/null 2>&1 || true
-    if bun run build >/tmp/ext-build.log 2>&1; then
+    if VITE_CPHUB_API_URL="\$EXT_API_URL" VITE_CPHUB_WEB_URL="\$EXT_WEB_URL" bun run build >/tmp/ext-build.log 2>&1; then
       rm -f cphub-extension.zip
       ( cd dist && zip -qr ../cphub-extension.zip . )
       echo "  extension v\$(python3 -c 'import json;print(json.load(open("dist/manifest.json"))["version"])') zipped (\$(du -h cphub-extension.zip | cut -f1))"

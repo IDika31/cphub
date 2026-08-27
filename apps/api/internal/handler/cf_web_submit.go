@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -28,28 +29,14 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "problemId, sourceCode, language wajib diisi"})
 	}
 
-	var problem model.Problem
-	if pid, pErr := uuid.Parse(in.ProblemID); pErr == nil {
-		err = h.db.First(&problem, "id = ?", pid).Error
-	} else {
-		err = h.db.First(&problem, "provider = ? AND problem_id = ?", "codeforces", in.ProblemID).Error
+	problem, contestID, index, pErr := h.resolveCFProblem(in.ProblemID)
+	if pErr != nil {
+		return pErr.send(c)
 	}
-	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Problem tidak ditemukan"})
-	}
-	if problem.Provider != "codeforces" {
-		return c.Status(400).JSON(fiber.Map{"error": "Submit ini hanya untuk problem Codeforces"})
-	}
-	m := cfProblemIDRe.FindStringSubmatch(problem.ProblemID)
-	if m == nil {
-		return c.Status(400).JSON(fiber.Map{"error": "problemId Codeforces tidak valid: " + problem.ProblemID})
-	}
-	contestID, _ := strconv.Atoi(m[1])
-	index := strings.ToUpper(m[2])
 
 	session, account, err := h.cfSession(uid)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return cfSessionError(c, err)
 	}
 
 	langs, err := session.LanguageOptions(contestID)
@@ -75,6 +62,53 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 
 	verdict, subID, runtime, memory := h.pollVerdict(account.Handle, problem.ProblemID, lastID)
 
+	h.recordCFSubmission(uid, problem, in.Language, verdict, subID, runtime, memory)
+	log.Printf("[cf-web] %s submitted %s as lang %s → %s (id=%d)", account.Handle, problem.ProblemID, langID, verdict, subID)
+	return c.JSON(cfSubmitReply(contestID, verdict, subID, runtime))
+}
+
+// cfProblemError carries a lookup failure with the status it should answer with, so
+// resolveCFProblem can be shared by handlers that must reply differently from each
+// other only in their own logic, not in this.
+type cfProblemError struct {
+	status  int
+	message string
+}
+
+func (e *cfProblemError) send(c *fiber.Ctx) error {
+	return c.Status(e.status).JSON(fiber.Map{"error": e.message})
+}
+
+// resolveCFProblem accepts either CPHub's own UUID or a Codeforces ref like "4A" and
+// returns the problem plus its contest id and index.
+func (h *CFWebHandler) resolveCFProblem(problemID string) (model.Problem, int, string, *cfProblemError) {
+	var (
+		problem model.Problem
+		err     error
+	)
+	if pid, pErr := uuid.Parse(problemID); pErr == nil {
+		err = h.db.First(&problem, "id = ?", pid).Error
+	} else {
+		err = h.db.First(&problem, "provider = ? AND problem_id = ?", "codeforces", problemID).Error
+	}
+	if err != nil {
+		return problem, 0, "", &cfProblemError{404, "Problem tidak ditemukan"}
+	}
+	if problem.Provider != "codeforces" {
+		return problem, 0, "", &cfProblemError{400, "Submit ini hanya untuk problem Codeforces"}
+	}
+	m := cfProblemIDRe.FindStringSubmatch(problem.ProblemID)
+	if m == nil {
+		return problem, 0, "", &cfProblemError{400, "problemId Codeforces tidak valid: " + problem.ProblemID}
+	}
+	contestID, _ := strconv.Atoi(m[1])
+	return problem, contestID, strings.ToUpper(m[2]), nil
+}
+
+// recordCFSubmission files the submission in CPHub's own history. A failure here is
+// logged rather than returned: the code is already on Codeforces, so telling the user
+// the submit failed would be a lie.
+func (h *CFWebHandler) recordCFSubmission(uid uuid.UUID, problem model.Problem, language, verdict string, subID, runtime int, memory int64) {
 	extSub := &model.ExternalSubmission{
 		UserID:       uid,
 		ProblemID:    problem.ID,
@@ -83,7 +117,7 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 		ProblemTitle: problem.Title,
 		ProblemRef:   problem.ProblemID,
 		ProblemGroup: problem.ProblemGroup,
-		Language:     in.Language,
+		Language:     language,
 		Verdict:      verdict,
 		Runtime:      runtime,
 		Memory:       int(memory / 1024),
@@ -91,15 +125,31 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 	if err := h.db.Create(extSub).Error; err != nil {
 		log.Printf("[cf-web] failed to record submission %d: %v", subID, err)
 	}
+}
 
-	log.Printf("[cf-web] %s submitted %s as lang %s → %s (id=%d)", account.Handle, problem.ProblemID, langID, verdict, subID)
-	return c.JSON(fiber.Map{
+// cfSubmitReply is what the editor's submit popup reads.
+//
+// The verdict is normalised here, not passed through. Codeforces answers in its own
+// long form ("WRONG_ANSWER", "OK"), TLX answers in short codes ("WA", "AC"), and the
+// popup keys its label and colour off the short set — so a raw Codeforces verdict fell
+// through to the popup's default and displayed as "Unknown" on a submission that had a
+// perfectly clear result. Measured on 2257D, verdict WRONG_ANSWER.
+//
+// normalizeVerdict is the same mapping every dashboard aggregate already uses, so both
+// judges land on one vocabulary rather than two.
+//
+// The database keeps the provider's own wording (see recordCFSubmission): it is more
+// specific than the canonical set, existing rows are stored that way, and the dashboard
+// normalises on read anyway.
+func cfSubmitReply(contestID int, verdict string, subID, runtime int) fiber.Map {
+	canonical := normalizeVerdict(verdict)
+	return fiber.Map{
 		"submissionId": subID,
-		"verdict":      verdict,
-		"pending":      verdict == "TESTING" || verdict == "",
+		"verdict":      canonical,
+		"pending":      canonical == VerdictPend,
 		"runtime":      runtime,
-		"url":          "https://codeforces.com/contest/" + m[1] + "/submission/" + strconv.Itoa(subID),
-	})
+		"url":          fmt.Sprintf("https://codeforces.com/contest/%d/submission/%d", contestID, subID),
+	}
 }
 
 // pollVerdict watches user.status for the submission that appeared after lastID.
@@ -147,13 +197,33 @@ func (h *CFWebHandler) Register(c *fiber.Ctx) error {
 
 	session, account, err := h.cfSession(uid)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return cfSessionError(c, err)
 	}
-	if err := session.RegisterContest(contestID); err != nil {
+	already, err := session.RegisterContest(contestID)
+	if err != nil {
 		log.Printf("[cf-web] register contest %d failed: %v", contestID, err)
 		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	log.Printf("[cf-web] %s registered for contest %d", account.Handle, contestID)
-	return c.JSON(fiber.Map{"contestId": contestID, "handle": account.Handle, "registered": true})
+	// Recorded either way. "Already registered" is the only signal CPHub ever gets about
+	// a registration made directly on codeforces.com, so throwing it away would mean the
+	// contest list keeps offering a button for something the user is already in.
+	ref := strconv.Itoa(contestID)
+	reg := model.ContestRegistration{
+		UserID: uid, Provider: "codeforces", ContestRef: ref, RegisteredAt: time.Now(),
+	}
+	if dbErr := h.db.Where("user_id = ? AND provider = ? AND contest_ref = ?", uid, "codeforces", ref).
+		FirstOrCreate(&reg).Error; dbErr != nil {
+		// The registration itself succeeded on Codeforces, so this is not the user's
+		// problem: the button will simply still be there next time.
+		log.Printf("[cf-web] could not record registration for contest %s: %v", ref, dbErr)
+	}
+
+	log.Printf("[cf-web] %s registered for contest %d (already=%t)", account.Handle, contestID, already)
+	return c.JSON(fiber.Map{
+		"contestId":  contestID,
+		"handle":     account.Handle,
+		"registered": true,
+		"already":    already,
+	})
 }

@@ -145,3 +145,30 @@ func TestParseHTMLDoesNotDuplicateSections(t *testing.T) {
 		t.Errorf("test cases = %d, want 1", len(p.TestCases))
 	}
 }
+
+// The markup here is copied verbatim from codeforces.com/problemset/problem/4/A
+// (captured 2026-08-27), because the previous pattern was written against a shape
+// the site had already stopped using and silently returned no tags for every
+// problem.
+func TestExtractTagsReadsSpanMarkup(t *testing.T) {
+	html := `<div class="roundbox borderTopRound borderBottomRound" style="margin:2px;">` +
+		`<span class="tag-box" style="font-size:1.2rem;" title="Brute force"> brute force </span></div>` +
+		`<div class="roundbox borderTopRound borderBottomRound" style="margin:2px;">` +
+		`<span class="tag-box" style="font-size:1.2rem;" title="Math"> math </span></div>` +
+		`<div class="roundbox borderTopRound borderBottomRound" style="margin:2px;">` +
+		`<span class="tag-box" style="font-size:1.2rem;" title="Difficulty"> *800 </span></div>`
+
+	got := extractTags(html)
+	if got != `["brute force","math"]` {
+		t.Errorf("extractTags = %s, want [\"brute force\",\"math\"]", got)
+	}
+}
+
+// The difficulty box shares the tag-box class, and storing *800 as a topic tag
+// would put it in front of users as one.
+func TestExtractTagsSkipsDifficultyOnly(t *testing.T) {
+	html := `<span class="tag-box" title="Difficulty"> *1500 </span>`
+	if got := extractTags(html); got != "[]" {
+		t.Errorf("extractTags = %s, want []", got)
+	}
+}

@@ -9,6 +9,7 @@ import Modal from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { fetchConnections, unlinkAccount, linkTLX, linkTLXCustom, type LinkedAccount } from "@/lib/api/connections";
 import { loginCodeforces } from "@/lib/api/codeforces";
+import { hasExtension, loginCodeforcesViaExtension, ExtensionMissingError } from "@/lib/extension-bridge";
 import { apiClient, API_BASE_URL } from "@/lib/api/client";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 import { providerLabel, PROVIDER_TLX_CUSTOM } from "@/lib/providers";
@@ -30,9 +31,15 @@ export default function ConnectionsPage() {
   const [tlxLoading, setTlxLoading] = useState(false);
   const [tlxError, setTlxError] = useState("");
   const [tlxImportOpen, setTlxImportOpen] = useState(false);
-  // Codeforces logs in with handle+password like TLX does. It has no OAuth of its
-  // own, and only a real session can submit or register, so this is the primary
-  // path — the old OAuth button stays as a secondary option.
+  // Codeforces login happens in the user's own browser, through the extension: it
+  // opens codeforces.com/enter, waits for the user to sign in there, and hands CPHub
+  // the resulting session. The password never reaches CPHub, and 2FA or a Cloudflare
+  // prompt is just the user's normal login.
+  //
+  // The handle+password form is kept for browsers without the extension, where the
+  // server has to log in on the user's behalf.
+  const [cfExt, setCfExt] = useState<"checking" | "ready" | "absent">("checking");
+  const [cfUsePassword, setCfUsePassword] = useState(false);
   const [cfModalOpen, setCfModalOpen] = useState(false);
   const [cfHandle, setCfHandle] = useState("");
   const [cfPassword, setCfPassword] = useState("");
@@ -81,6 +88,43 @@ export default function ConnectionsPage() {
       window.location.href = res.redirectUrl;
     } catch (err) {
       setCfError(`OAuth Codeforces gagal dimulai: ${(err as Error).message || "cek koneksi API"}`);
+    }
+  }
+
+  // Probed on open rather than on mount: the bridge is injected per tab, so a user
+  // who installs the extension mid-session gets the good path without a reload.
+  useEffect(() => {
+    if (!cfModalOpen) return;
+    let cancelled = false;
+    setCfExt("checking");
+    hasExtension().then((present) => {
+      if (cancelled) return;
+      setCfExt(present ? "ready" : "absent");
+      // No extension means the password form is the only way through, so go straight
+      // there instead of showing a button that cannot work.
+      if (!present) setCfUsePassword(true);
+    });
+    return () => { cancelled = true; };
+  }, [cfModalOpen]);
+
+  async function handleCodeforcesExtensionLogin() {
+    setCfLoading(true);
+    setCfError("");
+    try {
+      const res = await loginCodeforcesViaExtension();
+      addToast("success", `Codeforces terhubung sebagai ${res.handle}`);
+      setCfModalOpen(false);
+      loadData();
+    } catch (err) {
+      if (err instanceof ExtensionMissingError) {
+        setCfExt("absent");
+        setCfUsePassword(true);
+        setCfError("Extension tidak menjawab. Pasang extension CPHub, atau login dengan password.");
+      } else {
+        setCfError((err as Error).message || "Login Codeforces gagal");
+      }
+    } finally {
+      setCfLoading(false);
     }
   }
 
@@ -360,12 +404,60 @@ export default function ConnectionsPage() {
         </Modal>
 
         <Modal open={cfModalOpen} onClose={() => { setCfModalOpen(false); setCfError(""); }} title="Hubungkan Codeforces">
-          <form onSubmit={handleCodeforcesSubmit} className="space-y-4">
+          {!cfUsePassword ? (
+          <div className="space-y-4">
             <p className="text-[13px] text-[#a1a1aa]">
-              Codeforces tidak punya API untuk submit maupun daftar contest, jadi CPHub
-              menyimpan sesi login kamu dan memakai sesi itu. Password hanya dipakai untuk
-              login; kalau disimpan, disimpan terenkripsi di server.
+              CPHub akan membuka halaman login Codeforces di tab baru. Login di sana
+              seperti biasa — password kamu tidak pernah masuk ke CPHub. Kalau kamu
+              sudah login di browser ini, tab itu langsung tertutup sendiri.
             </p>
+            <p className="text-[12px] text-[#a1a1aa]">
+              {cfExt === "checking" && "Mengecek extension CPHub..."}
+              {cfExt === "ready" && "Extension CPHub terdeteksi."}
+            </p>
+            {cfError && <p role="alert" className="text-[12px] text-[#f87171]">{cfError}</p>}
+            <div className="flex flex-wrap justify-between gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={() => { setCfUsePassword(true); setCfError(""); }}>
+                Pakai password
+              </Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="ghost" onClick={() => { setCfModalOpen(false); setCfError(""); }}>
+                  Batal
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={cfLoading || cfExt === "checking"}
+                  onClick={handleCodeforcesExtensionLogin}
+                >
+                  {cfLoading ? "Menunggu login..." : "Buka login Codeforces"}
+                </Button>
+              </div>
+            </div>
+          </div>
+          ) : (
+          <form onSubmit={handleCodeforcesSubmit} className="space-y-4">
+            <p role="alert" className="text-[13px] text-[#fbbf24]">
+              Login lewat server kemungkinan besar <strong>gagal</strong>. Codeforces
+              menjaga halaman login-nya dengan Cloudflare challenge yang tidak bisa
+              dilewati browser headless — diukur langsung: halaman problem lolos dalam
+              3 detik, halaman login tidak pernah lolos. Yang bisa melewatinya adalah
+              browser kamu sendiri, lewat extension.
+            </p>
+            <p className="text-[13px] text-[#a1a1aa]">
+              {cfExt === "absent"
+                ? "Extension CPHub tidak terdeteksi. Pasang extension-nya untuk login yang berfungsi; form di bawah dibiarkan ada untuk kalau Cloudflare melonggar."
+                : "Form ini dibiarkan ada untuk kalau Cloudflare melonggar."}
+            </p>
+            {cfExt === "ready" && (
+              <button
+                type="button"
+                onClick={() => { setCfUsePassword(false); setCfError(""); }}
+                className="text-[12px] text-[#8b5cf6] hover:underline"
+              >
+                ← Login lewat browser saja (password tidak dikirim ke CPHub)
+              </button>
+            )}
             <div className="space-y-2">
               <label htmlFor={cfHandleId} className="block text-[12px] text-[#a1a1aa]">Handle atau email</label>
               <input
@@ -419,6 +511,7 @@ export default function ConnectionsPage() {
               </div>
             </div>
           </form>
+          )}
         </Modal>
 
         <Modal open={tlxModalOpen} onClose={() => { setTlxModalOpen(false); setTlxError(""); }} title="Hubungkan TLX TOKI">

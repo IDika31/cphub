@@ -17,7 +17,7 @@ import { useToast } from "@/components/ui/toast";
 import { fetchProblem } from "@/lib/api/problems";
 import { runCode, parseTimeLimitMs, parseMemoryLimitMb, type GraderResult } from "@/lib/api/grader";
 import { submitTLX, type SubmitTLXResult } from "@/lib/api/tlx";
-import { submitCF } from "@/lib/api/codeforces";
+import { submitCFPreferBrowser } from "@/lib/api/codeforces";
 import { isTLXFamily } from "@/lib/providers";
 import { getDefaultTemplate, applyTemplate } from "@/lib/template";
 import { saveToLocalStorage, loadFromLocalStorage, debounce } from "@/lib/auto-save";
@@ -207,12 +207,14 @@ export default function ProblemDetailPage() {
     setSubmitResult(null);
     setPopupOpen(true);
     try {
-      // Codeforces has no submit API, so the server drives a stored browser
-      // session; TLX has one and takes the token. Both answer with a verdict, so
-      // the popup below does not care which judge it was.
+      // Codeforces has no submit API. The extension posts the form from the user's
+      // own browser when it is installed — that browser already holds the session and
+      // the Cloudflare clearance — and the server falls back to its own session when
+      // it is not. TLX has a real API and takes the token. All paths answer with a
+      // verdict, so the popup below does not care which judge or which route it was.
       const res =
         problem.provider === "codeforces"
-          ? await submitCF(problem.id, code, language).then((r) => ({
+          ? await submitCFPreferBrowser(problem, code, language).then((r) => ({
               submissionJid: String(r.submissionId),
               verdict: r.verdict,
               score: 0,

@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import { submitCFViaExtension, registerContestViaExtension, ExtensionMissingError } from "../extension-bridge";
 
 /** Codeforces publishes no OAuth of its own and no write API, so handle+password is
  *  the primary way in: the server keeps a browser session and uses it to submit and
@@ -33,6 +34,51 @@ export async function submitCF(
   });
 }
 
+/** Finishes a submit the extension made in the browser: the verdict and CPHub's own
+ *  history come from the server, because user.status is on the API host and needs
+ *  neither a session nor a Cloudflare clearance. */
+export async function observeCFSubmit(problemId: string, language: string): Promise<SubmitCFResult> {
+  return apiClient("/api/cf/submit/observe", {
+    method: "POST",
+    body: JSON.stringify({ problemId, language }),
+  });
+}
+
+/**
+ * Submits a Codeforces solution, preferring the user's own browser.
+ *
+ * The browser is the cheap path: it already holds a logged-in session and a valid
+ * Cloudflare clearance, so nothing has to be solved. The server path is the fallback
+ * for browsers without the extension, and there the server has to earn its own
+ * clearance with a headless Chrome.
+ *
+ * The fallback fires ONLY when the extension is absent. Any other extension failure is
+ * surfaced as-is: once the form has been posted, retrying on the server would either
+ * double-submit or collide with Codeforces' own "you have submitted exactly the same
+ * code before", and both are worse than an honest error.
+ */
+export async function submitCFPreferBrowser(
+  problem: { id: string; problemId: string },
+  sourceCode: string,
+  language: string,
+): Promise<SubmitCFResult & { via: "browser" | "server" }> {
+  const ref = /^(\d+)([A-Za-z]\d*)$/.exec(problem.problemId ?? "");
+  if (ref) {
+    try {
+      await submitCFViaExtension({
+        contestId: Number(ref[1]),
+        problemIndex: ref[2],
+        language,
+        source: sourceCode,
+      });
+      return { ...(await observeCFSubmit(problem.id, language)), via: "browser" };
+    } catch (err) {
+      if (!(err instanceof ExtensionMissingError)) throw err;
+    }
+  }
+  return { ...(await submitCF(problem.id, sourceCode, language)), via: "server" };
+}
+
 /** The dropdown Codeforces itself renders. programTypeId changes whenever a
  *  compiler is updated, so the ids are read live rather than hardcoded. */
 export async function fetchCFLanguages(contestId = 1): Promise<{ data: Array<{ id: string; name: string }> }> {
@@ -50,6 +96,16 @@ export interface Contest {
   startTime?: string;
   durationSeconds: number;
   url: string;
+  /** When registration opens, when Codeforces said it had not yet. Absent means open, or
+   *  unknown — and unknown is treated as open so a wrongly hidden button cannot keep
+   *  someone out of a round. Filled by the extension's contest-state sync. */
+  registrationOpensAt?: string;
+  /** Whether THIS user is signed up. Codeforces exposes registration in no read API —
+   *  contest.standings refuses a contest that has not started, which is exactly when
+   *  registration is open — so the server reports what it recorded when CPHub registered,
+   *  or when Codeforces answered "already registered" to an attempt. A registration made
+   *  straight on codeforces.com is unknown until Register is clicked once. */
+  registered: boolean;
 }
 
 export async function fetchContests(params: {
@@ -76,7 +132,42 @@ export async function syncCFContestProblems(contestRef: string): Promise<{ conte
   return apiClient(`/api/cf/contests/${contestRef}/problems/sync`, { method: "POST" });
 }
 
-/** Registration is an action against the contest, taken with the stored session. */
-export async function registerContest(contestRef: string): Promise<{ registered: boolean; handle: string }> {
+/** Registration is an action against the contest, taken with the stored session.
+ *  `already` distinguishes "you were in this already" from "you are in now". */
+export async function registerContest(contestRef: string): Promise<{ registered: boolean; handle: string; already: boolean }> {
   return apiClient(`/api/contests/${contestRef}/register`, { method: "POST" });
+}
+
+/** Records a registration the extension performed, so CPHub's own list reflects it. */
+export async function recordContestRegistration(contestRef: string): Promise<void> {
+  await apiClient(`/api/contests/${contestRef}/registered`, { method: "POST" });
+}
+
+/**
+ * Registers for a contest, preferring the user's own browser.
+ *
+ * Same reasoning as submitting: the browser already holds a logged-in session and a valid
+ * Cloudflare clearance, while the server has to earn its own — and Codeforces gates some
+ * pages hard enough that a headless solve never clears them.
+ *
+ * The server fallback fires ONLY when the extension is absent. Any other extension failure
+ * is surfaced as-is, because a registration that may already have gone through must not be
+ * retried down a second path.
+ */
+export async function registerContestPreferBrowser(
+  contestRef: string,
+): Promise<{ registered: boolean; already: boolean; via: "browser" | "server" }> {
+  const contestId = Number(contestRef);
+  if (Number.isFinite(contestId) && contestId > 0) {
+    try {
+      const res = await registerContestViaExtension(contestId);
+      // The server keeps CPHub's own record; the extension only acted on Codeforces.
+      await recordContestRegistration(contestRef);
+      return { ...res, via: "browser" };
+    } catch (err) {
+      if (!(err instanceof ExtensionMissingError)) throw err;
+    }
+  }
+  const res = await registerContest(contestRef);
+  return { registered: res.registered, already: res.already, via: "server" };
 }

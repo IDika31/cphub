@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { pingAPI } from "../shared/api";
+import { pingAPI, DEFAULT_API_URL, DEFAULT_WEB_URL } from "../shared/api";
 import { getSyncedCount } from "../shared/storage";
 import { MESSAGE_TYPES } from "../shared/messages";
 
@@ -10,8 +10,8 @@ export default function App() {
   const [apiOk, setApiOk] = useState(false);
   const [latency, setLatency] = useState(0);
   const [syncedCount, setSyncedCount] = useState(0);
-  const [apiUrl, setApiUrl] = useState("http://localhost:3001");
-  const [webUrl, setWebUrl] = useState("http://localhost:3000");
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+  const [webUrl, setWebUrl] = useState(DEFAULT_WEB_URL);
   const [pairingToken, setPairingToken] = useState("");
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -224,7 +224,7 @@ export default function App() {
                 value={webUrl}
                 onChange={(e) => setWebUrl(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl text-[12px] bg-surface border border-border text-primary outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-                placeholder="http://localhost:3000"
+                placeholder={DEFAULT_WEB_URL}
               />
             </div>
 

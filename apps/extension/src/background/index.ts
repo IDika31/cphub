@@ -72,7 +72,27 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
 });
 
-async function openTLXImport(tlxUrl: string) {
+/**
+ * beside places a new tab immediately to the right of the one it came from, instead of
+ * at the end of the strip where Chrome puts it by default. Opening the editor five tabs
+ * away from the problem it belongs to is the kind of small friction that adds up.
+ *
+ * windowId travels with the index deliberately: an index alone is interpreted in the
+ * *current* window, so a command fired from a second window would drop the tab in the
+ * wrong place. An unknown or already-closed source tab returns nothing and lets Chrome
+ * decide, which is the right fallback.
+ */
+async function beside(tabId?: number): Promise<{ index?: number; windowId?: number }> {
+  if (tabId === undefined) return {};
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return { index: tab.index + 1, windowId: tab.windowId };
+  } catch {
+    return {};
+  }
+}
+
+async function openTLXImport(tlxUrl: string, sourceTabId?: number) {
   const webBase = await getWebUrl();
   let importUrl = `${webBase}/problems/import?url=${encodeURIComponent(tlxUrl)}`;
   try {
@@ -80,7 +100,7 @@ async function openTLXImport(tlxUrl: string) {
     const apiHost = tlxApiHostMap[hostname];
     if (apiHost) importUrl += `&apiHost=${encodeURIComponent(apiHost)}`;
   } catch { /* ignore parse error */ }
-  chrome.tabs.create({ url: importUrl });
+  chrome.tabs.create({ url: importUrl, ...(await beside(sourceTabId)) });
 }
 
 // Alt+C lands here from two directions: chrome.commands when the shortcut is
@@ -90,12 +110,13 @@ async function openTLXImport(tlxUrl: string) {
 async function openEditorForTab(url: string, tabId?: number) {
   if (!url) return;
   const webBase = await getWebUrl();
+  const placement = await beside(tabId);
 
   if (isTlxUrl(url)) {
     if (isTlxProblemUrl(url)) {
-      await openTLXImport(url);
+      await openTLXImport(url, tabId);
     } else {
-      chrome.tabs.create({ url: `${webBase}/problems?provider=tlx` });
+      chrome.tabs.create({ url: `${webBase}/problems?provider=tlx`, ...placement });
     }
     return;
   }
@@ -113,11 +134,12 @@ async function openEditorForTab(url: string, tabId?: number) {
     const cfId = cfMatch ? `${cfMatch[1]}${cfMatch[2].toUpperCase()}` : "";
     chrome.tabs.create({
       url: cfId ? `${webBase}/problems/${cfId}` : `${webBase}/problems?provider=codeforces`,
+      ...placement,
     });
     return;
   }
 
-  chrome.tabs.create({ url: `${webBase}/dashboard` });
+  chrome.tabs.create({ url: `${webBase}/dashboard`, ...placement });
 }
 
 chrome.runtime.onMessage.addListener(
@@ -127,7 +149,7 @@ chrome.runtime.onMessage.addListener(
     if (message.type === MESSAGE_TYPES.OPEN_TLX_IMPORT) {
       const url = (message.payload as { url?: string } | undefined)?.url;
       if (url) {
-        openTLXImport(url);
+        openTLXImport(url, sender.tab?.id);
         sendResponse({ success: true });
       } else {
         sendResponse({ success: false, error: "Missing TLX url" });
@@ -181,7 +203,16 @@ function webappBridgeFunc() {
   if ((globalThis as Record<string, unknown>).__cphubBridgeReady) return;
   (globalThis as Record<string, unknown>).__cphubBridgeReady = true;
 
-  const ALLOWED = new Set(["CF_SUBMIT", "CF_CHECK_VERDICT", "PING"]);
+  const ALLOWED = new Set([
+    "CF_LOGIN",
+    "CF_SESSION_STATUS",
+    "CF_SUBMIT",
+    "CF_LANGUAGES",
+    "CF_REGISTER",
+    "CF_CONTEST_STATES",
+    "CF_CHECK_VERDICT",
+    "PING",
+  ]);
   let port: chrome.runtime.Port | null = null;
   const pending = new Map<string, (r: object) => void>();
 

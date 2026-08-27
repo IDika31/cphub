@@ -29,8 +29,29 @@ type Config struct {
 	// password. Empty means no password is ever written to the database, and an
 	// expired session has to be re-entered by hand.
 	CredEncKey string
-	Grader     GraderConfig
-	Log        LogConfig
+	// Browser is the headless Chromium that clears the Cloudflare managed challenge
+	// on codeforces.com. It is the fallback path: the extension normally logs in and
+	// submits from the user's own browser, which needs no solver at all.
+	Browser BrowserConfig
+	Grader  GraderConfig
+	Log     LogConfig
+}
+
+// BrowserConfig configures the headless browser used to pass Cloudflare.
+type BrowserConfig struct {
+	// Disabled turns the solver off, leaving the extension as the only path. The default is
+	// on: a missing browser is already handled by falling back, so there is nothing
+	// to protect against by defaulting to off.
+	Disabled bool
+	// Path is the browser binary. Empty autodetects from PATH and the usual install
+	// locations, Edge included.
+	Path string
+	// Timeout bounds one solve, launch included.
+	Timeout time.Duration
+	// NoSandbox passes --no-sandbox. It is set automatically when the API runs as
+	// root, which is the only case that needs it; forcing it otherwise gives up the
+	// renderer sandbox for nothing.
+	NoSandbox bool
 }
 
 type DBConfig struct {
@@ -172,6 +193,12 @@ func Load() *Config {
 		CFAPIKey:    getEnv("CF_API_KEY", ""),
 		CFAPISecret: getEnv("CF_API_SECRET", ""),
 		CredEncKey:  getEnv("CRED_ENC_KEY", ""),
+		Browser: BrowserConfig{
+			Disabled:  !getEnvBool("CF_BROWSER_ENABLED", true),
+			Path:      getEnv("CF_BROWSER_PATH", ""),
+			Timeout:   getEnvDuration("CF_BROWSER_TIMEOUT", 45*time.Second),
+			NoSandbox: getEnvBool("CF_BROWSER_NO_SANDBOX", false),
+		},
 		Grader: GraderConfig{
 			MaxConcurrent:     getEnvInt("GRADER_MAX_CONCURRENT", 5),
 			TimeoutSeconds:    getEnvInt("GRADER_TIMEOUT_SECONDS", 5),
@@ -203,6 +230,11 @@ func getEnv(key, defaultVal string) string {
 func getEnvInt(key string, defaultVal int) int {
 	viper.SetDefault(key, defaultVal)
 	return viper.GetInt(key)
+}
+
+func getEnvBool(key string, defaultVal bool) bool {
+	viper.SetDefault(key, defaultVal)
+	return viper.GetBool(key)
 }
 
 func getEnvDuration(key string, defaultVal time.Duration) time.Duration {

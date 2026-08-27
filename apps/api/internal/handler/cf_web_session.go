@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -12,6 +13,23 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
+
+// errCFSessionExpired marks the one Codeforces failure the user can fix on the spot.
+// It is matched with errors.Is rather than by string, and cfSessionError turns it into
+// a response carrying ErrCodeCFSessionExpired so the web app can reopen the extension
+// login flow instead of printing prose and stopping there.
+var errCFSessionExpired = errors.New("sesi Codeforces kedaluwarsa — hubungkan ulang di halaman Connections")
+
+// cfSessionError renders a cfSession failure. Every caller used to inline the same
+// 400, which meant an expired session was indistinguishable from a malformed request
+// and the UI could not act on either.
+func cfSessionError(c *fiber.Ctx, err error) error {
+	if errors.Is(err, errCFSessionExpired) {
+		return c.Status(fiber.StatusUnauthorized).
+			JSON(fiber.Map{"error": err.Error(), "code": ErrCodeCFSessionExpired})
+	}
+	return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+}
 
 // cfSession restores the stored browser session and proves it is still valid.
 // Codeforces expires sessions on its own schedule, so an expired one is renewed
@@ -36,7 +54,9 @@ func (h *CFWebHandler) cfSession(uid uuid.UUID) (*codeforces.WebSession, *model.
 	}
 
 	if account.PasswordEnc == "" || h.box == nil {
-		return nil, nil, fmt.Errorf("sesi Codeforces kedaluwarsa — login ulang di halaman Connections")
+		// No stored password to renew with — which is the normal case now that login
+		// happens in the user's browser. The extension is asked to log in again.
+		return nil, nil, errCFSessionExpired
 	}
 	password, err := h.box.Open(account.PasswordEnc)
 	if err != nil {
@@ -44,7 +64,8 @@ func (h *CFWebHandler) cfSession(uid uuid.UUID) (*codeforces.WebSession, *model.
 	}
 	handle, err := session.Login(account.Handle, password)
 	if err != nil {
-		return nil, nil, fmt.Errorf("login ulang otomatis gagal: %w", err)
+		// The saved password no longer works, so this is the user's problem again.
+		return nil, nil, fmt.Errorf("%w (login ulang otomatis gagal: %v)", errCFSessionExpired, err)
 	}
 	blob, _ := session.Export()
 	now := time.Now()
@@ -65,7 +86,7 @@ func (h *CFWebHandler) Languages(c *fiber.Ctx) error {
 	contestID := c.QueryInt("contestId", 1)
 	session, _, err := h.cfSession(uid)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return cfSessionError(c, err)
 	}
 	langs, err := session.LanguageOptions(contestID)
 	if err != nil {

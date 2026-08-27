@@ -9,6 +9,7 @@ import (
 	"github.com/IDika31/cphub/api/internal/model"
 	"github.com/IDika31/cphub/api/internal/provider/codeforces"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -170,7 +171,52 @@ func (h *CFSyncHandler) ListContests(c *fiber.Ctx) error {
 		log.Printf("[cf-sync] contest list failed: %v", err)
 		return c.Status(500).JSON(fiber.Map{"error": "Gagal memuat contest"})
 	}
+	h.markRegistered(c, rows)
 	return c.JSON(fiber.Map{"data": rows, "total": total})
+}
+
+// markRegistered flags the contests this viewer has already signed up for, so the list
+// can offer a Register button only where it would do something.
+//
+// One query for the whole page rather than one per row: the page is up to 500 contests,
+// and a per-row lookup would be 500 round trips for a boolean.
+//
+// A failure here leaves every flag false, which shows a Register button the user may not
+// need. That is the right way round — Codeforces treats a second registration as a no-op
+// and reports "already registered", so an extra button costs a click, while a wrongly
+// hidden one would leave someone unable to enter a round.
+func (h *CFSyncHandler) markRegistered(c *fiber.Ctx, rows []model.Contest) {
+	if len(rows) == 0 {
+		return
+	}
+	raw, ok := c.Locals("userId").(string)
+	if !ok {
+		return
+	}
+	uid, err := uuid.Parse(raw)
+	if err != nil {
+		return
+	}
+
+	refs := make([]string, 0, len(rows))
+	for _, r := range rows {
+		refs = append(refs, r.ContestRef)
+	}
+	var registered []model.ContestRegistration
+	if err := h.db.Where("user_id = ? AND contest_ref IN ?", uid, refs).Find(&registered).Error; err != nil {
+		log.Printf("[cf-sync] registration lookup failed: %v", err)
+		return
+	}
+
+	// Keyed on provider too: contest_ref is the provider's own id, so "2257" could
+	// belong to two different judges.
+	inContest := make(map[string]bool, len(registered))
+	for _, reg := range registered {
+		inContest[reg.Provider+"/"+reg.ContestRef] = true
+	}
+	for i := range rows {
+		rows[i].Registered = inContest[rows[i].Provider+"/"+rows[i].ContestRef]
+	}
 }
 
 // SyncContestProblems fills in one contest's problems. contest.standings is the

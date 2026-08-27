@@ -54,6 +54,14 @@ type Solver interface {
 	Solve(ctx context.Context, target *url.URL, kind Challenge, body string) ([]*http.Cookie, error)
 }
 
+// UserAgentReporter is the optional half of Solver: a solver that knows which
+// User-Agent earned its cookies says so here, and the client adopts it before
+// replaying the request. BrowserSolver implements it by reading navigator.userAgent
+// off the browser it just drove, which beats assuming the two already agree.
+type UserAgentReporter interface {
+	UserAgent() string
+}
+
 // Client is an http.Client that answers what it can and reports what it cannot.
 type Client struct {
 	http    *http.Client

@@ -8,6 +8,7 @@ import (
 	"github.com/IDika31/cphub/api/internal/grader"
 	"github.com/IDika31/cphub/api/internal/handler"
 	"github.com/IDika31/cphub/api/internal/middleware"
+	"github.com/IDika31/cphub/api/internal/provider/cloudflare"
 	"github.com/IDika31/cphub/api/internal/provider/codeforces"
 	"github.com/IDika31/cphub/api/internal/repository"
 	"github.com/IDika31/cphub/api/internal/server"
@@ -52,6 +53,22 @@ func main() {
 	// overhead so it is not charged against a submission time limit.
 	_ = grader.StartupCheck()
 	grader.SetTuning(cfg.Grader.TimeGraceMS, cfg.Grader.SandboxOverheadMS)
+
+	// Point Codeforces at a headless browser. It is what clears the Cloudflare
+	// managed challenge on codeforces.com, and therefore what makes the whole site
+	// usable rather than only the live contests the m1/m3 mirrors carry. A missing
+	// browser is reported and then ignored: the mirror path still works.
+	if cfg.Browser.Disabled {
+		log.Println("[cphub] Codeforces browser solver disabled — mirrors only (live contests)")
+	} else if path, err := codeforces.EnableBrowserSolver(cloudflare.BrowserOptions{
+		Path:      cfg.Browser.Path,
+		Timeout:   cfg.Browser.Timeout,
+		NoSandbox: cfg.Browser.NoSandbox,
+	}); err != nil {
+		log.Printf("[cphub] Codeforces browser solver unavailable, mirrors only: %v", err)
+	} else {
+		log.Printf("[cphub] Codeforces browser solver ready: %s", path)
+	}
 
 	// Repositories
 	_ = repository.NewUserRepository(db) // used by handlers via direct DB access
@@ -147,6 +164,12 @@ func registerRoutes(
 	sync.Post("/submission", syncHandler.SyncSubmission)
 	// Custom TLX hosts added in the extension become their own Connections entry.
 	sync.Post("/tlx-hosts", syncHandler.SyncTLXHosts)
+	// The extension captures a Codeforces session in the user's own browser and hands
+	// it over here, so no password ever reaches CPHub.
+	sync.Post("/cf-session", cfWebHandler.SessionFromExtension)
+	// Registration state read off Codeforces' own contest list in the user's browser —
+	// the only accurate source, since no read API exposes it.
+	sync.Post("/cf-contest-states", cfWebHandler.ContestStatesFromExtension)
 
 	// Problems (JWT protected)
 	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
@@ -214,10 +237,16 @@ func registerRoutes(
 	cf.Post("/login", cfWebHandler.Login)
 	cf.Get("/languages", cfWebHandler.Languages)
 	cf.Post("/submit", cfWebHandler.Submit)
+	// The extension submits from the user's own browser and then asks for the verdict
+	// here, because user.status is on the API host and needs no session or clearance.
+	cf.Post("/submit/observe", cfWebHandler.ObserveSubmit)
 
 	contests := app.Group("/api/contests", middleware.AuthRequired(cfg.JWT))
 	contests.Get("/", cfSyncHandler.ListContests)
 	contests.Post("/:id/register", cfWebHandler.Register)
+	// The extension registers in the user's own browser and then reports it here, so
+	// CPHub's list reflects it without the server needing a Codeforces session at all.
+	contests.Post("/:id/registered", cfWebHandler.RecordRegistration)
 
 	// Settings
 	settingsGroup := app.Group("/api/settings", middleware.AuthRequired(cfg.JWT))

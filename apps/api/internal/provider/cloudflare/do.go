@@ -110,11 +110,21 @@ func (c *Client) answer(ctx context.Context, u *url.URL, gate Challenge, body st
 		if err != nil {
 			return err
 		}
-		if len(cookies) > 0 {
-			c.http.Jar.SetCookies(u, cookies)
-			return nil
+		if len(cookies) == 0 {
+			return errors.New("solver returned no cookies")
 		}
-		return errors.New("solver returned no cookies")
+		// Cloudflare binds cf_clearance to the User-Agent that earned it, so the
+		// fingerprint has to follow the solver rather than the other way round:
+		// replaying a browser's clearance under this client's own UA is the same as
+		// having no clearance at all. A solver that cannot report its UA is trusted
+		// to already match.
+		if reporter, ok := c.opts.Solver.(UserAgentReporter); ok {
+			if ua := reporter.UserAgent(); ua != "" && ua != c.Browser().Headers["User-Agent"] {
+				c.setBrowser(withUserAgent(c.Browser(), ua))
+			}
+		}
+		c.http.Jar.SetCookies(u, cookies)
+		return nil
 	}
 
 	// Turnstile and captcha gates are solvable by a provider. A managed challenge

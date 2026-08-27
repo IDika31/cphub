@@ -1,8 +1,19 @@
 import { generateHMAC } from "./crypto";
+import type { CFContestState } from "./cf-contests";
 import { getSetting } from "./storage";
 
-const DEFAULT_API_URL = "http://localhost:3001";
-const DEFAULT_WEB_URL = "http://localhost:3000";
+/**
+ * Where an unconfigured extension points.
+ *
+ * The values come from the build, not from this file: see src/vite-env.d.ts for why, and
+ * deploy/push.sh for where the server supplies them. localhost remains the fallback so a
+ * plain `bun run build` still produces a development extension.
+ *
+ * Exported because the Options page shows them as its initial field values, and two
+ * copies of a default is how a default starts lying.
+ */
+export const DEFAULT_API_URL = import.meta.env.VITE_CPHUB_API_URL || "http://localhost:3001";
+export const DEFAULT_WEB_URL = import.meta.env.VITE_CPHUB_WEB_URL || "http://localhost:3000";
 
 export interface SyncPayload {
   provider: "codeforces" | "tlx";
@@ -118,6 +129,90 @@ export async function pingAPI(): Promise<{ status: string; latencyMs: number }> 
     status: res.ok ? "ok" : "error",
     latencyMs: Math.round(end - start),
   };
+}
+
+/** Hands CPHub the Codeforces session this browser just captured, so the server can
+ *  act on the account when the extension is not around to do it itself.
+ *
+ *  What travels: the Codeforces identity cookies and the ftaa/bfaa pair. What does
+ *  not: the password (never seen — the user types it into Codeforces' own page) and
+ *  cf_clearance (Cloudflare binds it to this IP, so the server cannot use it). */
+export async function pushCFSession(snapshot: {
+  handle: string;
+  cookies: Array<{ name: string; value: string }>;
+  ftaa: string;
+  bfaa: string;
+}): Promise<{ handle: string; rating?: number }> {
+  const key = await getExtensionKey();
+  if (!key) {
+    throw new Error("Extension belum dipasangkan — tempel pairing token dari CPHub Settings");
+  }
+  const apiUrl = await getApiUrl();
+  const body = JSON.stringify(snapshot);
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const signature = await generateHMAC(body, key.secret);
+
+  const res = await fetch(`${apiUrl}/api/sync/cf-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Key-Id": key.keyId,
+      "X-HMAC-Signature": signature,
+      "X-Nonce": nonce,
+    },
+    body,
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    const message = (errorBody as { error?: string }).error || `HTTP ${res.status}`;
+    throw new HttpError(message, res.status);
+  }
+  return (await res.json()) as { handle: string; rating?: number };
+}
+
+/** What the server did with the states it was handed. `unknown` are the rows whose state
+ *  the page did not state — counted rather than dropped silently, because a sync that
+ *  suddenly understands nothing is a markup change worth seeing in the log. */
+export interface ContestStateReceipt {
+  seen: number;
+  registered: number;
+  cleared: number;
+  unknown: number;
+  windows: number;
+}
+
+/** Hands CPHub the registration state this browser read off Codeforces' own contest list.
+ *
+ *  This is the only accurate source: no Codeforces read API exposes registration, so
+ *  without it CPHub can never learn about a round the user joined directly on the site. */
+export async function pushContestStates(
+  states: CFContestState[],
+): Promise<ContestStateReceipt> {
+  const key = await getExtensionKey();
+  if (!key) {
+    throw new Error("Extension belum dipasangkan — tempel pairing token dari CPHub Settings");
+  }
+  const apiUrl = await getApiUrl();
+  const body = JSON.stringify({ states });
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const signature = await generateHMAC(body, key.secret);
+
+  const res = await fetch(`${apiUrl}/api/sync/cf-contest-states`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Key-Id": key.keyId,
+      "X-HMAC-Signature": signature,
+      "X-Nonce": nonce,
+    },
+    body,
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    const message = (errorBody as { error?: string }).error || `HTTP ${res.status}`;
+    throw new HttpError(message, res.status);
+  }
+  return (await res.json()) as ContestStateReceipt;
 }
 
 /** Custom Judgels/TLX hosts the user added in the extension. Pushed to CPHub so
