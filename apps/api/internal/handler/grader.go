@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/IDika31/cphub/api/internal/config"
@@ -101,7 +102,18 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 		Profile:       h.cfg.FirejailProfile,
 	}
 
+	judged := 0
 	for i, tc := range req.TestCases {
+		// A blank expected output is not an expectation. The editor's Expected field
+		// is labelled optional, and a problem with no synced samples runs one empty
+		// case just to see what the program prints — comparing against "" made every
+		// program that printed anything come back WA. Only cases that carry something
+		// to compare against are judged.
+		hasExpectation := strings.TrimSpace(tc.Output) != ""
+		if hasExpectation {
+			judged++
+		}
+
 		execResult, err := grader.RunSandboxed(context.Background(), lang, td, tc.Input, opts)
 		if err != nil {
 			results = append(results, grader.TestResult{
@@ -118,7 +130,7 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 			verdict = grader.VerdictTLE
 		} else if execResult.ExitCode != 0 {
 			verdict = grader.VerdictRE
-		} else if !grader.CompareOutput(tc.Output, execResult.Stdout) {
+		} else if hasExpectation && !grader.CompareOutput(tc.Output, execResult.Stdout) {
 			verdict = grader.VerdictWA
 		}
 
@@ -155,9 +167,9 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 
 	aggregate := grader.AggregateVerdict(results)
 
-	// Persist the run as a local submission and update problem solved status.
-	// Works for any provider (codeforces, tlx) since it keys off the problem row.
-	h.persistRun(c, &req, aggregate, results, passedTests, maxRuntime, maxMemory)
+	// Persist the run as a local submission. Works for any provider (codeforces,
+	// tlx) since it keys off the problem row.
+	h.persistRun(c, &req, aggregate, results, passedTests, maxRuntime, maxMemory, judged)
 
 	return c.JSON(grader.GraderResult{
 		Verdict:     aggregate,
@@ -169,10 +181,19 @@ func (h *GraderHandler) Run(c *fiber.Ctx) error {
 	})
 }
 
-// persistRun records the grader run as a LocalSubmission and, on full AC,
-// marks the problem solved. Best-effort: failures are logged, never block the response.
-func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader.Verdict, results []grader.TestResult, passed int, maxRuntime, maxMemory int64) {
-	if h.db == nil || req.ProblemID == "" {
+// persistRun records the grader run as a LocalSubmission. It deliberately does
+// not write problems.status: that column is shared by the whole library
+// (model.Problem has no owner), so marking it "solved" here marked the problem
+// solved for every other user too. The per-user status the Problemset shows is
+// overlaid from these local_submissions rows instead — see applyUserStatus in
+// problem.go — so the row created below is all a solve needs.
+// Best-effort: failures are logged, never block the response.
+//
+// judged is the number of test cases that carried an expected output. A run with
+// none of them was never compared against anything, so filing it would put a free
+// AC into the history the overlay reads "solved" from.
+func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader.Verdict, results []grader.TestResult, passed int, maxRuntime, maxMemory int64, judged int) {
+	if h.db == nil || req.ProblemID == "" || judged == 0 {
 		return
 	}
 	userIDStr, ok := c.Locals("userId").(string)
@@ -210,14 +231,6 @@ func (h *GraderHandler) persistRun(c *fiber.Ctx, req *RunRequest, verdict grader
 	}
 	if err := h.db.Create(&sub).Error; err != nil {
 		log.Printf("[grader] failed to record submission: %v", err)
-	}
-
-	// Full AC → mark solved (don't downgrade an already-solved problem).
-	if verdict == grader.VerdictAC && problem.Status != "solved" {
-		if err := h.db.Model(&model.Problem{}).Where("id = ?", problem.ID).
-			Update("status", "solved").Error; err != nil {
-			log.Printf("[grader] failed to mark problem solved: %v", err)
-		}
 	}
 }
 

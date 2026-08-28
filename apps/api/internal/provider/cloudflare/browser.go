@@ -295,7 +295,7 @@ func (b *BrowserSolver) args(profileDir string) []string {
 	}
 	args = append(args,
 		"--remote-debugging-port=0",
-		"--user-data-dir=" + profileDir,
+		"--user-data-dir="+profileDir,
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-blink-features=AutomationControlled",

@@ -24,6 +24,11 @@ const PROVIDERS = [
   { value: "tlx-custom", label: "TLX Custom" },
 ];
 
+// Matches the API's own default limit (submission.go). The endpoints return the
+// full count next to a single page, so without a pager the footer claimed rows
+// that were unreachable.
+const PAGE_SIZE = 50;
+
 
 
 function formatWhen(iso?: string) {
@@ -53,24 +58,36 @@ function SubmissionsContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
     setError("");
     const load =
       tab === "local"
-        ? fetchLocalSubmissions({ provider: provider || undefined }).then((res) => {
+        ? fetchLocalSubmissions({ provider: provider || undefined, page, limit: PAGE_SIZE }).then((res) => {
+            if (ignore) return;
             setLocal(res.data);
             setLocalTotal(res.total);
           })
-        : fetchExternalSubmissions({ provider: provider || undefined }).then((res) => {
+        : fetchExternalSubmissions({ provider: provider || undefined, page, limit: PAGE_SIZE }).then((res) => {
+            if (ignore) return;
             setExternal(res.data);
             setExternalTotal(res.total);
           });
     load
-      .catch((err: unknown) => setError((err as Error).message || "Gagal memuat submission"))
-      .finally(() => setLoading(false));
-  }, [tab, provider]);
+      .catch((err: unknown) => {
+        if (!ignore) setError((err as Error).message || "Gagal memuat submission");
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    // A slow answer for the page we just left must not overwrite the newer one.
+    return () => {
+      ignore = true;
+    };
+  }, [tab, provider, page]);
 
   const query = search.trim().toLowerCase();
   const visibleLocal = useMemo(
@@ -85,8 +102,15 @@ function SubmissionsContent() {
   const total = tab === "local" ? localTotal : externalTotal;
   const shown = tab === "local" ? visibleLocal.length : visibleExternal.length;
   const loaded = tab === "local" ? local.length : external.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const firstRow = (page - 1) * PAGE_SIZE + 1;
+  const rangeLabel =
+    loaded === 0 ? `0 dari ${total} submission` : `${firstRow}–${firstRow + loaded - 1} dari ${total} submission`;
 
   function setProvider(next: string) {
+    // Reset here rather than in the fetch effect: doing it there would fire the
+    // effect twice and load the stale page first.
+    setPage(1);
     router.push(`/submissions${next ? `?provider=${next}` : ""}`);
   }
 
@@ -129,7 +153,10 @@ function SubmissionsContent() {
                 id={`submissions-tab-${key}`}
                 aria-selected={tab === key}
                 aria-controls="submissions-panel"
-                onClick={() => setTab(key)}
+                onClick={() => {
+                  setTab(key);
+                  setPage(1);
+                }}
                 className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
                   tab === key ? "bg-[#7c3aed] text-white" : "bg-[#1f1f23] text-[#a1a1aa] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
                 }`}
@@ -188,10 +215,35 @@ function SubmissionsContent() {
         </div>
 
         {!loading && total > 0 && (
-          <p className="text-[11px] text-[#a1a1aa] mt-2 text-right" aria-live="polite">
-            {query ? `${shown} dari ${loaded} tampil · ${total} total` : `${total} submission`}
-            {provider ? ` · ${providerLabel(provider)}` : ""}
-          </p>
+          <div className="flex flex-wrap items-center justify-end gap-3 mt-2">
+            <p className="text-[11px] text-[#a1a1aa] text-right" aria-live="polite">
+              {/* The search only filters the rows on this page — the endpoints
+                  take no q — so the label says which set it is talking about. */}
+              {query ? `${shown} dari ${loaded} di halaman ini · ${total} total` : rangeLabel}
+              {provider ? ` · ${providerLabel(provider)}` : ""}
+            </p>
+            {pages > 1 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="default"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                >
+                  Sebelumnya
+                </Button>
+                <span className="text-[11px] text-[#a1a1aa] tabular-nums whitespace-nowrap">
+                  {`Halaman ${page} dari ${pages}`}
+                </span>
+                <Button
+                  variant="default"
+                  onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                  disabled={page >= pages}
+                >
+                  Berikutnya
+                </Button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </>

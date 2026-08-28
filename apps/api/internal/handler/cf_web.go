@@ -100,7 +100,7 @@ func (h *CFWebHandler) Login(c *fiber.Ctx) error {
 	}
 
 	assign := map[string]interface{}{
-		"provider_user_id":   handle,
+		"provider_user_id": handle,
 		// handle is in here for a reason: it is what cfSession re-logs in with and what
 		// the verdict poll asks user.status about, so leaving it out meant relinking a
 		// DIFFERENT Codeforces account updated every other column and kept the old

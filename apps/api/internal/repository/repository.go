@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -50,13 +51,57 @@ func (r *ProblemRepository) FindAll(filter map[string]interface{}, limit, offset
 		query = query.Where("provider = ?", provider)
 	}
 	if tag, ok := filter["tag"]; ok {
-		query = query.Where("tags LIKE ?", "%"+tag.(string)+"%")
+		// tags is a JSON array stored as text, so the quotes anchor the match on a
+		// whole element: a bare substring made ?tag=graph hit "graph matchings" and
+		// ?tag=string hit "string suffix structures". LOWER on both sides because
+		// Postgres LIKE is case-sensitive and the providers store their tags
+		// lowercase, so ?tag=DP came back as an empty page instead of a match.
+		// LIKE metacharacters in the value are escaped so a tag containing % or _
+		// cannot turn into a wildcard.
+		t := strings.ToLower(strings.TrimSpace(tag.(string)))
+		t = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(t)
+		query = query.Where("LOWER(tags) LIKE ?", `%"`+t+`"%`)
 	}
 	if difficulty, ok := filter["difficulty"]; ok {
 		query = query.Where("difficulty = ?", difficulty)
 	}
-	if status, ok := filter["status"]; ok {
-		query = query.Where("status = ?", status)
+	// status is per viewer, so it is answered from that viewer's own submissions and
+	// never from problems.status. That column is shared by the whole library — one
+	// row per problem, no owner — so filtering on it returned the problems SOMEBODY
+	// had solved, and the page then labelled them from the caller's own history (see
+	// applyUserStatus): a listing that disagreed with itself, row by row.
+	//
+	// The predicates are the SQL twin of UserProblemStatus: external rows join on
+	// provider + problem_ref, local grader runs on the problem's primary key, and
+	// Codeforces' "OK" counts as accepted alongside "AC".
+	if status, ok := filter["status"].(string); ok {
+		userID, hasUser := filter["userId"].(uuid.UUID)
+		if !hasUser {
+			return nil, 0, fmt.Errorf("status filter needs a user")
+		}
+		const solvedSQL = `(EXISTS (SELECT 1 FROM external_submissions es
+			WHERE es.user_id = ? AND es.provider = problems.provider
+			  AND es.problem_ref = problems.problem_id
+			  AND UPPER(TRIM(es.verdict)) IN ('OK','AC','ACCEPTED'))
+			OR EXISTS (SELECT 1 FROM local_submissions ls
+			WHERE ls.user_id = ? AND ls.problem_id = problems.id
+			  AND UPPER(TRIM(ls.verdict)) = 'AC'))`
+		const touchedSQL = `(EXISTS (SELECT 1 FROM external_submissions es
+			WHERE es.user_id = ? AND es.provider = problems.provider
+			  AND es.problem_ref = problems.problem_id)
+			OR EXISTS (SELECT 1 FROM local_submissions ls
+			WHERE ls.user_id = ? AND ls.problem_id = problems.id))`
+		switch status {
+		case "solved":
+			query = query.Where(solvedSQL, userID, userID)
+		case "attempted":
+			// Tried but not yet solved, which is what the badge means.
+			query = query.Where(touchedSQL, userID, userID).Where("NOT "+solvedSQL, userID, userID)
+		case "unsolved":
+			query = query.Where("NOT "+touchedSQL, userID, userID)
+		default:
+			return nil, 0, fmt.Errorf("unknown status %q", status)
+		}
 	}
 	// The handler has always passed "q" through; nothing read it, so
 	// /api/problems?q=... quietly returned the whole table.
@@ -71,7 +116,12 @@ func (r *ProblemRepository) FindAll(filter map[string]interface{}, limit, offset
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err := query.Order("created_at DESC").Limit(limit).Offset(offset).Preload("TestCases").Find(&problems).Error
+	// id breaks created_at ties: the problemset sync inserts in batches of 500 and
+	// GORM stamps one timestamp per batch, so ~500 rows share a created_at and a
+	// LIMIT/OFFSET over that alone can put the same problem on two pages and none
+	// on the third. No Preload here — the list only renders title/difficulty/tags,
+	// and shipping every sample I/O for 50 problems is a second query nobody reads.
+	err := query.Order("created_at DESC").Order("id").Limit(limit).Offset(offset).Find(&problems).Error
 	return problems, total, err
 }
 
@@ -257,6 +307,9 @@ func (r *SubmissionRepository) FindLocalByUser(userID uuid.UUID, provider string
 			ls.passed_tests, ls.total_tests, ls.executed_at, ls.created_at`).
 		Order("ls.executed_at DESC NULLS LAST").
 		Order("ls.created_at DESC").
+		// Unique tiebreak, or a page boundary inside a group of equal timestamps
+		// can repeat a row on the next page and drop another entirely.
+		Order("ls.id").
 		Limit(limit).Offset(offset).
 		Scan(&rows).Error
 	return rows, total, err
@@ -282,6 +335,9 @@ func (r *SubmissionRepository) FindExternalByUser(userID uuid.UUID, provider str
 	err := base().
 		Order("submitted_at DESC NULLS LAST").
 		Order("created_at DESC").
+		// Same reason as the local list: one sync writes many rows with the same
+		// created_at, so without a unique tiebreak paging can duplicate and skip.
+		Order("id").
 		Limit(limit).Offset(offset).
 		Find(&subs).Error
 	return subs, total, err

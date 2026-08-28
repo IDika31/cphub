@@ -12,8 +12,8 @@ var (
 	// The submit form's language dropdown. Codeforces renumbers programTypeId
 	// whenever it updates a compiler, so the ids are read from the page instead of
 	// being carried as a table that silently rots.
-	langOptionRe  = regexp.MustCompile(`(?s)<option value="(\d+)"[^>]*>(.*?)</option>`)
-	langSelectRe  = regexp.MustCompile(`(?s)<select[^>]+name="programTypeId".*?</select>`)
+	langOptionRe = regexp.MustCompile(`(?s)<option value="(\d+)"[^>]*>(.*?)</option>`)
+	langSelectRe = regexp.MustCompile(`(?s)<select[^>]+name="programTypeId".*?</select>`)
 	// Both quote styles, because Codeforces' raw HTML mixes them: its own template
 	// emits <input type='hidden' name='csrf_token' …/> in single quotes while the rest
 	// of the page uses double. A browser's DOM hides that; this client reads the bytes.

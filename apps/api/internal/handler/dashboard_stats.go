@@ -127,6 +127,13 @@ func aggregate(provider string, rows []rawSubmission) providerStats {
 		v := normalizeVerdict(r.Verdict)
 		verdicts[v]++
 		st.Submissions++
+		// Accepted is per submission, like totals() and Activity() count it. It used
+		// to sit behind the problem_ref guard below, so a row synced without a ref —
+		// the sync endpoint only requires provider and submissionId — showed up in
+		// the AC bar of the verdict chart while Accuracy read 0%.
+		if v == VerdictAC {
+			st.Accepted++
+		}
 
 		if r.Language != "" {
 			languages[r.Language]++
@@ -146,12 +153,15 @@ func aggregate(provider string, rows []rawSubmission) providerStats {
 		}
 
 		ref := r.ProblemRef
+		// Everything past here is keyed by problem, so a missing ref has to be
+		// dropped: "" would otherwise count as one phantom problem in Solved,
+		// Attempted and the unrated difficulty band. Submission counts above are
+		// unaffected.
 		if ref == "" {
 			continue
 		}
 		triedRefs[ref] = true
 		if v == VerdictAC {
-			st.Accepted++
 			solvedRefs[ref] = true
 		}
 

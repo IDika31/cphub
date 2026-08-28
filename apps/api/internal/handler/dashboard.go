@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -46,18 +47,31 @@ type linkedInfo struct {
 	StatsSyncedAt    *time.Time
 }
 
-func (h *DashboardHandler) linkedAccounts(userID uuid.UUID) map[string]linkedInfo {
+// linkedAccounts groups the user's linked accounts by provider. The value is a
+// slice, not a single row: tlx-custom stores one row per self-hosted instance
+// (see syncTLXInstance's Where on handle), so keying by provider alone kept
+// whichever row the unordered scan happened to return last — a user with two
+// instances saw one of them, chosen differently between requests. Ordered by
+// handle so anything that still has to collapse them collapses the same way twice.
+//
+// The error is returned rather than swallowed: this is a named-column select, so a
+// half-applied migration made it fail and every provider was then reported as
+// connected:false — which disables the dashboard's own Sync buttons.
+func (h *DashboardHandler) linkedAccounts(userID uuid.UUID) (map[string][]linkedInfo, error) {
 	var rows []linkedInfo
-	h.db.Table("linked_accounts").
+	if err := h.db.Table("linked_accounts").
 		Select(`provider, handle, provider_username, display_name, rating, max_rating, is_connected AS connected,
 			total_score, problems_tried, problems_solved, stats_synced_at`).
 		Where("user_id = ?", userID).
-		Scan(&rows)
-	out := make(map[string]linkedInfo, len(rows))
-	for _, r := range rows {
-		out[r.Provider] = r
+		Order("handle").
+		Scan(&rows).Error; err != nil {
+		return nil, err
 	}
-	return out
+	out := make(map[string][]linkedInfo, len(rows))
+	for _, r := range rows {
+		out[r.Provider] = append(out[r.Provider], r)
+	}
+	return out, nil
 }
 
 func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
@@ -72,7 +86,11 @@ func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to load submissions"})
 	}
 
-	linked := h.linkedAccounts(userID)
+	linked, err := h.linkedAccounts(userID)
+	if err != nil {
+		log.Printf("[dashboard] load linked accounts failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load linked accounts"})
+	}
 
 	// Problem library counts are global: problems have no owner, they are the
 	// shared pool the editor reads from. Labelled as "library" so it is not
@@ -82,7 +100,10 @@ func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
 		Provider string
 		Total    int
 	}
-	h.db.Table("problems").Select("provider, COUNT(*) AS total").Group("provider").Scan(&libRows)
+	if err := h.db.Table("problems").Select("provider, COUNT(*) AS total").Group("provider").Scan(&libRows).Error; err != nil {
+		log.Printf("[dashboard] load problem library counts failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load problem library"})
+	}
 	libraryTotal := 0
 	for _, r := range libRows {
 		library[r.Provider] = r.Total
@@ -103,23 +124,49 @@ func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
 		seen[name] = true
 		st := aggregate(name, byProvider[name])
 		st.Library = library[name]
-		if info, ok := linked[name]; ok {
-			st.Handle = info.Handle
-			st.ProviderUsername = info.ProviderUsername
-			st.DisplayName = info.DisplayName
-			st.Connected = info.Connected
-			st.Rating = info.Rating
-			st.MaxRating = info.MaxRating
+		if rows := linked[name]; len(rows) > 0 {
+			for _, info := range rows {
+				if info.Connected {
+					st.Connected = true
+				}
+			}
+			// Identity is only meaningful when the provider is one account. The
+			// submission numbers in st already cover every instance of a
+			// self-hosted judge (external_submissions has no host column, only
+			// provider), so printing one instance's handle, username and rating
+			// beside them labelled merged totals with a single host's name. Leave
+			// them empty instead: providerLabel falls back to the provider name and
+			// ProviderCard omits a zero rating.
+			if len(rows) == 1 {
+				st.Handle = rows[0].Handle
+				st.ProviderUsername = rows[0].ProviderUsername
+				st.DisplayName = rows[0].DisplayName
+				st.Rating = rows[0].Rating
+				st.MaxRating = rows[0].MaxRating
+			}
+			// The provider's own figures are summed over the instances for the same
+			// reason, so they cover what the submission counts above them cover.
+			var score int64
+			var tried, solved int
+			var syncedAt *time.Time
+			for _, info := range rows {
+				score += info.TotalScore
+				tried += info.ProblemsTried
+				solved += info.ProblemsSolved
+				if info.StatsSyncedAt != nil && (syncedAt == nil || info.StatsSyncedAt.After(*syncedAt)) {
+					syncedAt = info.StatsSyncedAt
+				}
+			}
 			// Only surfaced when the provider actually reported something, so the
 			// UI can tell "not synced yet" from "genuinely zero".
-			if info.ProblemsTried > 0 || info.TotalScore > 0 {
+			if tried > 0 || score > 0 {
 				st.Official = &officialStats{
-					Score:          info.TotalScore,
-					ProblemsTried:  info.ProblemsTried,
-					ProblemsSolved: info.ProblemsSolved,
+					Score:          score,
+					ProblemsTried:  tried,
+					ProblemsSolved: solved,
 				}
-				if info.StatsSyncedAt != nil {
-					st.Official.SyncedAt = info.StatsSyncedAt.UTC().Format(time.RFC3339)
+				if syncedAt != nil {
+					st.Official.SyncedAt = syncedAt.UTC().Format(time.RFC3339)
 				}
 			}
 		}
@@ -147,17 +194,28 @@ func (h *DashboardHandler) Overview(c *fiber.Ctx) error {
 		return providers[i].Provider < providers[j].Provider
 	})
 
+	totals, err := h.totals(userID, subs)
+	if err != nil {
+		log.Printf("[dashboard] load local run days failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load streak"})
+	}
+	localRuns, err := h.localRunStats(userID)
+	if err != nil {
+		log.Printf("[dashboard] load local run verdicts failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load local runs"})
+	}
+
 	return c.JSON(fiber.Map{
 		"providers": providers,
-		"totals":    h.totals(userID, subs),
+		"totals":    totals,
 		"library":   fiber.Map{"total": libraryTotal, "byProvider": library},
-		"localRuns": h.localRunStats(userID),
+		"localRuns": localRuns,
 	})
 }
 
 // totals mixes external judges with local grader runs for the streak, because a
 // day spent testing locally is still a day of practice.
-func (h *DashboardHandler) totals(userID uuid.UUID, subs []rawSubmission) fiber.Map {
+func (h *DashboardHandler) totals(userID uuid.UUID, subs []rawSubmission) (fiber.Map, error) {
 	solved := map[string]bool{}
 	tried := map[string]bool{}
 	accepted := 0
@@ -182,10 +240,14 @@ func (h *DashboardHandler) totals(userID uuid.UUID, subs []rawSubmission) fiber.
 	// locally is still practice. Selected as a named column rather than via
 	// Pluck, which expects a plain column name and not an expression.
 	var localRows []struct{ RanAt time.Time }
-	h.db.Table("local_submissions").
+	if err := h.db.Table("local_submissions").
 		Select("COALESCE(executed_at, created_at) AS ran_at").
 		Where("user_id = ?", userID).
-		Scan(&localRows)
+		Scan(&localRows).Error; err != nil {
+		// Swallowing this used to shorten the streak silently, which the response
+		// then presented as fact.
+		return nil, err
+	}
 	for _, r := range localRows {
 		if !r.RanAt.IsZero() {
 			days = append(days, r.RanAt)
@@ -207,19 +269,21 @@ func (h *DashboardHandler) totals(userID uuid.UUID, subs []rawSubmission) fiber.
 		"accuracy":      accuracy,
 		"streak":        current,
 		"longestStreak": longest,
-	}
+	}, nil
 }
 
-func (h *DashboardHandler) localRunStats(userID uuid.UUID) fiber.Map {
+func (h *DashboardHandler) localRunStats(userID uuid.UUID) (fiber.Map, error) {
 	var rows []struct {
 		Verdict string
 		Count   int
 	}
-	h.db.Table("local_submissions").
+	if err := h.db.Table("local_submissions").
 		Select("verdict, COUNT(*) AS count").
 		Where("user_id = ?", userID).
 		Group("verdict").
-		Scan(&rows)
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
 
 	merged := map[string]int{}
 	total := 0
@@ -233,7 +297,7 @@ func (h *DashboardHandler) localRunStats(userID uuid.UUID) fiber.Map {
 			verdicts = append(verdicts, verdictCount{Verdict: v, Count: n})
 		}
 	}
-	return fiber.Map{"total": total, "verdicts": verdicts}
+	return fiber.Map{"total": total, "verdicts": verdicts}, nil
 }
 
 // Activity is the calendar heatmap. The old version emitted
@@ -256,8 +320,15 @@ func (h *DashboardHandler) Activity(c *fiber.Ctx) error {
 		Verdict  string
 		Count    int
 	}
+	// AT TIME ZONE 'UTC' before truncating, because submitted_at is timestamptz and
+	// the DSN pins the session to Asia/Jakarta: DATE_TRUNC on its own returned WIB
+	// midnight, i.e. 17:00 UTC of the day before, and the .UTC().Format below then
+	// printed that earlier date. Every square in the heatmap sat one day back, and
+	// today's square never lit for anything submitted after 07:00 WIB. UTC is the
+	// boundary the client grid (setUTCHours/toISOString) and the streak in
+	// dashboard_stats.go already use, so all three now agree.
 	h.db.Table("external_submissions").
-		Select(`DATE_TRUNC('day', COALESCE(submitted_at, created_at)) AS day,
+		Select(`DATE_TRUNC('day', COALESCE(submitted_at, created_at) AT TIME ZONE 'UTC') AS day,
 			provider, verdict, COUNT(*) AS count`).
 		Where("user_id = ? AND COALESCE(submitted_at, created_at) >= ?", userID, since).
 		Group("day, provider, verdict").
@@ -405,11 +476,17 @@ func (h *DashboardHandler) RatingHistory(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "Unauthenticated"})
 	}
-	linked := h.linkedAccounts(userID)
+	linked, err := h.linkedAccounts(userID)
+	if err != nil {
+		log.Printf("[dashboard] load linked accounts failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load linked accounts"})
+	}
 
 	cf := make([]ratingPoint, 0)
-	if info, ok := linked["codeforces"]; ok && info.Handle != "" {
-		cf = fetchCFRating(info.Handle)
+	// Codeforces is one account per user, so the first row is the account; ordered
+	// by handle in linkedAccounts, so it does not change between requests.
+	if rows := linked["codeforces"]; len(rows) > 0 && rows[0].Handle != "" {
+		cf = cfRatingSeries(rows[0].Handle)
 	}
 
 	// Keys are provider names, plus "local" for Codeforces' own solve curve (the
@@ -417,46 +494,143 @@ func (h *DashboardHandler) RatingHistory(c *fiber.Ctx) error {
 	// provider that has synced rows gets its own series, so a self-hosted instance
 	// is charted from its own data instead of borrowing the official TLX curve —
 	// which is what the tlx-custom tab used to draw.
+	tlxSeries, err := h.solveProgress(userID, "tlx")
+	if err != nil {
+		log.Printf("[dashboard] solve progress (tlx) failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load progress"})
+	}
+	localSeries, err := h.solveProgress(userID, "codeforces")
+	if err != nil {
+		log.Printf("[dashboard] solve progress (codeforces) failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load progress"})
+	}
 	out := fiber.Map{
 		"codeforces": cf,
-		"tlx":        h.solveProgress(userID, "tlx"),
-		"local":      h.solveProgress(userID, "codeforces"),
+		"tlx":        tlxSeries,
+		"local":      localSeries,
 	}
 	var others []string
-	h.db.Table("external_submissions").
+	// Swallowing this error dropped every self-hosted instance's series, which is
+	// the one thing the comment above exists to prevent.
+	if err := h.db.Table("external_submissions").
 		Distinct("provider").
 		Where("user_id = ?", userID).
-		Pluck("provider", &others)
+		Pluck("provider", &others).Error; err != nil {
+		log.Printf("[dashboard] list submission providers failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load progress"})
+	}
 	for _, p := range others {
 		if _, taken := out[p]; taken || p == "" {
 			continue
 		}
-		out[p] = h.solveProgress(userID, p)
+		series, serr := h.solveProgress(userID, p)
+		if serr != nil {
+			log.Printf("[dashboard] solve progress (%s) failed: %v", p, serr)
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to load progress"})
+		}
+		out[p] = series
 	}
 
 	return c.JSON(out)
 }
 
-func fetchCFRating(handle string) []ratingPoint {
+// cfRatingTTL is how long a handle's contest history is kept. A rating only moves
+// after a rated contest, so a quarter hour of staleness costs nothing next to the
+// alternative: Codeforces allows roughly one request every two seconds and this
+// call sits inline on the dashboard's own request path.
+const cfRatingTTL = 15 * time.Minute
+
+func cfRatingKey(handle string) string { return "cf:rating:" + handle }
+
+// cfRatingSeries is what the handler calls: the live series when Codeforces
+// answers, the last good one when it does not. An empty slice is byte-identical to
+// an unrated account all the way to the chart, so failing quietly told a user with
+// forty rated contests "Belum ada riwayat kontes". A stale curve is the honest
+// answer, and the reason is logged with whatever Codeforces itself said.
+func cfRatingSeries(handle string) []ratingPoint {
+	points, err := fetchCFRating(handle)
+	if err == nil {
+		storeCFRating(handle, points)
+		return points
+	}
+	log.Printf("[dashboard] CF rating fetch failed for %s: %v", handle, err)
+	if cached, ok := cachedCFRating(handle); ok {
+		log.Printf("[dashboard] serving cached CF rating for %s (%d points)", handle, len(cached))
+		return cached
+	}
+	return []ratingPoint{}
+}
+
+// cachedCFRating reads the stored series. Redis is optional on this path: without
+// it there is simply no fallback, never an error the caller has to handle.
+func cachedCFRating(handle string) ([]ratingPoint, bool) {
+	if database.Cache == nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	raw, err := database.Cache.Get(ctx, cfRatingKey(handle)).Result()
+	if err != nil {
+		return nil, false
+	}
+	var points []ratingPoint
+	if err := json.Unmarshal([]byte(raw), &points); err != nil {
+		return nil, false
+	}
+	return points, true
+}
+
+func storeCFRating(handle string, points []ratingPoint) {
+	if database.Cache == nil || len(points) == 0 {
+		return
+	}
+	blob, err := json.Marshal(points)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := database.Cache.Set(ctx, cfRatingKey(handle), blob, cfRatingTTL).Err(); err != nil {
+		log.Printf("[dashboard] could not cache CF rating for %s: %v", handle, err)
+	}
+}
+
+// fetchCFRating returns the handle's rated-contest history, or an error saying
+// which way it failed. Transport errors, non-OK replies and decode errors were all
+// folded into an empty slice, so a rate limit was indistinguishable from an unrated
+// account. The timeout is deliberately short: this blocks the dashboard's render.
+func fetchCFRating(handle string) ([]ratingPoint, error) {
 	url := fmt.Sprintf("https://codeforces.com/api/user.rating?handle=%s", handle)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 4 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		log.Printf("[dashboard] CF rating fetch failed: %v", err)
-		return []ratingPoint{}
+		return nil, fmt.Errorf("codeforces unreachable: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("codeforces returned HTTP %d", resp.StatusCode)
+	}
 
 	var result struct {
 		Status string `json:"status"`
-		Result []struct {
+		// Codeforces explains its own refusals here ("Call limit exceeded",
+		// "handle: User with handle X not found"); without it every failure read
+		// the same in the log.
+		Comment string `json:"comment"`
+		Result  []struct {
 			ContestName    string `json:"contestName"`
 			NewRating      int    `json:"newRating"`
 			RatingUpdateAt int64  `json:"ratingUpdateTimeSeconds"`
 		} `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Status != "OK" {
-		return []ratingPoint{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("codeforces sent an unreadable reply: %w", err)
+	}
+	if result.Status != "OK" {
+		if result.Comment != "" {
+			return nil, fmt.Errorf("codeforces refused: %s", result.Comment)
+		}
+		return nil, fmt.Errorf("codeforces status %q", result.Status)
 	}
 
 	points := make([]ratingPoint, 0, len(result.Result))
@@ -467,21 +641,28 @@ func fetchCFRating(handle string) []ratingPoint {
 			Date:  r.RatingUpdateAt,
 		})
 	}
-	return points
+	return points, nil
 }
 
 // solveProgress is the cumulative count of distinct solved problems per day.
-func (h *DashboardHandler) solveProgress(userID uuid.UUID, provider string) []ratingPoint {
+// The day is truncated in UTC for the same reason as Activity: the columns are
+// timestamptz and the session zone is Asia/Jakarta, so a bare DATE_TRUNC returned
+// WIB midnight and the .UTC().Format below stamped every point one day early.
+// Both series have to pick the same boundary, or the heatmap and this curve bucket
+// the same submission into different days.
+func (h *DashboardHandler) solveProgress(userID uuid.UUID, provider string) ([]ratingPoint, error) {
 	var rows []struct {
 		ProblemRef string
 		Day        time.Time
 	}
-	h.db.Table("external_submissions").
-		Select("problem_ref, MIN(DATE_TRUNC('day', COALESCE(submitted_at, created_at))) AS day").
+	if err := h.db.Table("external_submissions").
+		Select("problem_ref, MIN(DATE_TRUNC('day', COALESCE(submitted_at, created_at) AT TIME ZONE 'UTC')) AS day").
 		Where("user_id = ? AND provider = ? AND problem_ref <> ''", userID, provider).
 		Where("UPPER(verdict) IN ('AC','OK','ACCEPTED')").
 		Group("problem_ref").
-		Scan(&rows)
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
 
 	perDay := map[string]int{}
 	for _, r := range rows {
@@ -500,7 +681,7 @@ func (h *DashboardHandler) solveProgress(userID uuid.UUID, provider string) []ra
 		t, _ := time.Parse("2006-01-02", d)
 		points = append(points, ratingPoint{Label: d, Value: running, Date: t.Unix()})
 	}
-	return points
+	return points, nil
 }
 
 // SyncCF pulls submission history from the public CF API and refreshes the
@@ -576,13 +757,37 @@ func (h *DashboardHandler) SyncCF(c *fiber.Ctx) error {
 			Memory:       int(sub.MemoryConsumedBytes / 1024),
 			SubmittedAt:  &submittedAt,
 		}
+		// FirstOrCreate is the "is this row new" signal and nothing more: with no
+		// Assign it only reads an existing row back, it never writes one. So a
+		// submission first synced while the judge was still working — CF reports
+		// TESTING, and during a rated round a pretests-only OK that system testing
+		// later overturns — kept that verdict forever, and the problem never counted
+		// as solved. Compare against the freshly fetched values (Find has overwritten
+		// the struct with the stored row) and update only when they differ, so a
+		// re-sync of 2000 unchanged rows still costs one query each.
+		memoryKB := int(sub.MemoryConsumedBytes / 1024)
 		res := h.db.Where("user_id = ? AND provider = ? AND submission_id = ?",
 			userID, "codeforces", submission.SubmissionID).
 			FirstOrCreate(&submission)
-		if res.Error != nil {
+		switch {
+		case res.Error != nil:
 			subErr = res.Error
-		} else if res.RowsAffected > 0 {
+		case res.RowsAffected > 0:
 			newSubs++
+		case submission.Verdict != sub.Verdict || submission.Runtime != sub.TimeConsumedMillis || submission.Memory != memoryKB:
+			// Never push a settled row back to pending: a rejudge that is briefly
+			// TESTING again must not undo a result already recorded.
+			if normalizeVerdict(sub.Verdict) != VerdictPend || normalizeVerdict(submission.Verdict) == VerdictPend {
+				if err := h.db.Model(&model.ExternalSubmission{}).
+					Where("id = ?", submission.ID).
+					Updates(map[string]interface{}{
+						"verdict": sub.Verdict,
+						"runtime": sub.TimeConsumedMillis,
+						"memory":  memoryKB,
+					}).Error; err != nil {
+					subErr = err
+				}
+			}
 		}
 	}
 
@@ -817,13 +1022,31 @@ func (h *DashboardHandler) syncTLXInstance(userID uuid.UUID, inst tlxInstance) (
 			SubmittedAt:  &submittedAt,
 			ProblemID:    problemID,
 		}
+		// As in SyncCF: FirstOrCreate with no Assign reads an existing row back and
+		// never updates it. A submission first synced while TLX was still grading is
+		// stored with an empty verdict and score 0 (which normalizeVerdict reads as
+		// PENDING), so the grading that landed an hour later never reached the row —
+		// the solve stayed invisible and accuracy stayed depressed until someone
+		// deleted the row by hand. verdictCode and score hold the freshly fetched
+		// values; FirstOrCreate has overwritten the struct with the stored row.
 		res := h.db.Where("user_id = ? AND provider = ? AND submission_id = ?",
 			userID, provider, submission.SubmissionID).
 			FirstOrCreate(&submission)
-		if res.Error != nil {
+		switch {
+		case res.Error != nil:
 			writeErr = res.Error
-		} else if res.RowsAffected > 0 {
+		case res.RowsAffected > 0:
 			newSubs++
+		case submission.Verdict != verdictCode || submission.Score != score:
+			// Never push a settled row back to pending: a rejudge in progress must
+			// not undo a result already recorded.
+			if normalizeVerdict(verdictCode) != VerdictPend || normalizeVerdict(submission.Verdict) == VerdictPend {
+				if err := h.db.Model(&model.ExternalSubmission{}).
+					Where("id = ?", submission.ID).
+					Updates(map[string]interface{}{"verdict": verdictCode, "score": score}).Error; err != nil {
+					writeErr = err
+				}
+			}
 		}
 	}
 

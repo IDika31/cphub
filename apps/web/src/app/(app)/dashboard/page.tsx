@@ -38,24 +38,40 @@ function pct(n: number) {
   return `${n.toFixed(n >= 10 ? 0 : 1)}%`;
 }
 
+/** One entry per linked Judgels instance, as POST /api/dashboard/sync-tlx returns
+ *  it. `error` is set for the instances that failed; the request still answers 200
+ *  as long as any instance fetched, so this list is the only place a partial
+ *  failure surfaces. lib/api/dashboard.ts stops at the flat aggregate fields. */
+type TLXInstanceResult = { provider: string; host: string; error?: string };
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [activity, setActivity] = useState<ActivityDay[]>([]);
   const [progress, setProgress] = useState<ProgressSeries>({});
   const [tags, setTags] = useState<TagStat[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
   const [scope, setScope] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [syncing, setSyncing] = useState<"" | "cf" | "tlx">("");
   const { addToast } = useToast();
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     const [overview, act, prog] = await Promise.all([
-      fetchDashboardOverview().catch(() => null),
+      fetchDashboardOverview().catch((err: unknown) => {
+        setLoadError((err as Error).message || "Gagal memuat dashboard");
+        return null;
+      }),
       fetchActivity(365).catch(() => ({ data: [] as ActivityDay[], since: "", days: 0 })),
       fetchProgress().catch(() => ({}) as ProgressSeries),
     ]);
-    setData(overview);
+    // A failed overview means the API is unreachable, not that the account is
+    // empty, so the last good snapshot stays on screen and the banner below says
+    // what happened. Overwriting with null used to zero every number and claim no
+    // judge was connected — the same picture a brand-new account gets.
+    if (overview) setData(overview);
     setActivity(act.data);
     setProgress(prog);
     setLoading(false);
@@ -64,11 +80,18 @@ export default function DashboardPage() {
   useEffect(() => { loadData(); }, [loadData]);
 
   // Tag stats are scoped to the selected provider, so switching tabs refetches
-  // only that one panel instead of the whole dashboard.
+  // only that one panel instead of the whole dashboard. It needs its own loading
+  // flag and cancel guard: the page-level `loading` is already false by then, so
+  // otherwise the previous judge's pass rates stay painted under the new tab, and
+  // a slow response for a tab the user left could land last and win.
   useEffect(() => {
+    let cancelled = false;
+    setTagsLoading(true);
     fetchTagWeakness(scope === "all" ? undefined : scope, 12)
-      .then((res) => setTags(res.data))
-      .catch(() => setTags([]));
+      .then((res) => { if (!cancelled) setTags(res.data); })
+      .catch(() => { if (!cancelled) setTags([]); })
+      .finally(() => { if (!cancelled) setTagsLoading(false); });
+    return () => { cancelled = true; };
   }, [scope]);
 
   const providers = data?.providers ?? [];
@@ -88,9 +111,11 @@ export default function DashboardPage() {
       .map((d) => {
         const count = d.byProvider[scope] ?? 0;
         // `solved` on the raw day is every provider's AC count, so it cannot be
-        // carried into a scoped view — it would colour a day on the strength of a
-        // different judge. The API breaks it down per provider for exactly this.
-        const solved = d.solvedByProvider?.[scope] ?? Math.min(d.solved, count);
+        // carried into a scoped view — it would credit this judge with another
+        // judge's ACs. The API breaks it down per provider for exactly this, and it
+        // leaves out providers that had no AC that day, so a missing key means
+        // "none here"; only a missing map (an older API build) falls back.
+        const solved = d.solvedByProvider ? (d.solvedByProvider[scope] ?? 0) : Math.min(d.solved, count);
         return { ...d, count, solved, byProvider: { [scope]: count } };
       })
       .filter((d) => d.count > 0);
@@ -107,7 +132,20 @@ export default function DashboardPage() {
         const off = res.official
           ? ` · TLX: ${res.official.problemsSolved}/${res.official.problemsTried} problem, ${res.official.score} pts`
           : "";
-        addToast("success", `TLX: ${res.submissions} submission baru (dari ${res.fetched} diambil)${off}`);
+        const base = `TLX: ${res.submissions} submission baru (dari ${res.fetched} diambil)${off}`;
+        // Sync TLX walks every linked instance and answers 200 as soon as one of
+        // them fetched, listing the failures in `instances[]`. Reading them is the
+        // only way a self-hosted instance with an expired token gets reported —
+        // otherwise it silently stops advancing behind a green toast.
+        const failed = ((res as typeof res & { instances?: TLXInstanceResult[] }).instances ?? [])
+          .filter((i) => i.error);
+        if (failed.length > 0) {
+          // "info", not "error": the counts above are real, the failure is partial.
+          // Every instance failing comes back 424 and lands in the catch below.
+          addToast("info", `${base} · gagal: ${failed.map((f) => `${f.host} (${f.error})`).join(", ")}`);
+        } else {
+          addToast("success", base);
+        }
       }
       await loadData();
     } catch (err) {
@@ -149,7 +187,16 @@ export default function DashboardPage() {
       </Topbar>
 
       <div className="flex-1 overflow-y-auto p-[14px] space-y-4">
-        {!loading && !anyConnected && (
+        {loadError && (
+          <div role="alert" className="flex items-center gap-3 text-[12px] text-[#f87171]">
+            <span>Gagal memuat dashboard: {loadError}</span>
+            <Button variant="default" onClick={() => loadData()} disabled={loading}>Coba lagi</Button>
+          </div>
+        )}
+
+        {/* Gated on `data` as well, so a failed load can never claim the judges are
+            unlinked — that is the harmful reading, not the empty numbers. */}
+        {!loading && data && !anyConnected && (
           <Link
             href="/connections"
             className="group flex items-center gap-3 bg-[rgba(139,92,246,0.08)] border border-[rgba(139,92,246,0.25)] rounded-[8px] p-[14px] hover:bg-[rgba(139,92,246,0.12)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
@@ -172,29 +219,42 @@ export default function DashboardPage() {
           loading={loading}
         />
 
-        {scope === "all" ? (
-          <AllProvidersView
-            data={data}
-            providers={providers}
-            loading={loading}
-            activity={scopedActivity}
-            progress={progress}
-            tags={tags}
-          />
-        ) : selected ? (
-          <SingleProviderView
-            stats={selected}
-            loading={loading}
-            activity={scopedActivity}
-            series={scope === "codeforces" ? (progress.codeforces ?? []) : (progress[scope] ?? [])}
-            solveSeries={progress[scope === "codeforces" ? "local" : scope] ?? []}
-            tags={tags}
-          />
-        ) : (
-          <Panel title={providerLabel(scope)}>
-            <EmptyPanel message="Provider ini belum punya data." />
-          </Panel>
-        )}
+        {/* The tabs above own this region, so it has to be the panel they point at —
+            a role="tab" with no tabpanel announces a pattern that isn't there.
+            `scope` can still name a provider that dropped out of the list, which
+            would leave aria-labelledby on a missing id, hence the fallback. */}
+        <div
+          id="dashboard-scope-panel"
+          role="tabpanel"
+          aria-labelledby={`scope-tab-${providers.some((p) => p.provider === scope) ? scope : "all"}`}
+          className="space-y-4"
+        >
+          {scope === "all" ? (
+            <AllProvidersView
+              data={data}
+              providers={providers}
+              loading={loading}
+              activity={scopedActivity}
+              progress={progress}
+              tags={tags}
+              tagsLoading={tagsLoading}
+            />
+          ) : selected ? (
+            <SingleProviderView
+              stats={selected}
+              loading={loading}
+              activity={scopedActivity}
+              series={scope === "codeforces" ? (progress.codeforces ?? []) : (progress[scope] ?? [])}
+              solveSeries={progress[scope === "codeforces" ? "local" : scope] ?? []}
+              tags={tags}
+              tagsLoading={tagsLoading}
+            />
+          ) : (
+            <Panel title={providerLabel(scope)}>
+              <EmptyPanel message="Provider ini belum punya data." />
+            </Panel>
+          )}
+        </div>
       </div>
     </>
   );
@@ -240,7 +300,9 @@ function ScopeTabs({
         <button
           key={t.value}
           role="tab"
+          id={`scope-tab-${t.value}`}
           aria-selected={scope === t.value}
+          aria-controls="dashboard-scope-panel"
           onClick={() => onChange(t.value)}
           className={`px-[12px] py-[5px] rounded-full text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
             scope === t.value
@@ -261,7 +323,7 @@ function ScopeTabs({
 }
 
 function AllProvidersView({
-  data, providers, loading, activity, progress, tags,
+  data, providers, loading, activity, progress, tags, tagsLoading,
 }: {
   data: DashboardOverview | null;
   providers: ProviderStats[];
@@ -269,6 +331,7 @@ function AllProvidersView({
   activity: ActivityDay[];
   progress: ProgressSeries;
   tags: TagStat[];
+  tagsLoading: boolean;
 }) {
   const t = data?.totals;
   const withData = providers.filter((p) => p.submissions > 0 || p.connected);
@@ -277,31 +340,43 @@ function AllProvidersView({
   const solveCurves = Object.entries(progress)
     .filter(([key, pts]) => key !== "codeforces" && pts.length > 1)
     .sort((a, b) => b[1].length - a[1].length);
+  // Named from the linked account, not from the key alone: bare providerLabel
+  // prints the generic "TLX Custom" for a self-hosted instance instead of the name
+  // its owner gave it.
+  const curveLabel = (key: string) => {
+    const p = key === "local" ? "codeforces" : key;
+    const s = providers.find((x) => x.provider === p);
+    return providerLabel(p, s?.handle, s?.displayName);
+  };
 
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* "—" whenever the overview isn't there: a zero here is a claim about the
+            account, and a failed fetch has nothing to claim. Accuracy also needs a
+            submission before a percentage means anything — 0 submissions is "—",
+            not a 0.0% success rate, which is how ProviderCard already reads it. */}
         <StatCard
           label="Problem Solved" loading={loading} accent="#34d399"
-          value={String(t?.solved ?? 0)}
+          value={t ? String(t.solved) : "—"}
           sub={`${t?.attempted ?? 0} dicoba · semua provider`}
           icon={<CheckCircle2 className="w-3.5 h-3.5" />}
         />
         <StatCard
           label="Submissions" loading={loading} accent="#60a5fa"
-          value={String(t?.submissions ?? 0)}
+          value={t ? String(t.submissions) : "—"}
           sub={`${t?.accepted ?? 0} accepted`}
           icon={<Send className="w-3.5 h-3.5" />}
         />
         <StatCard
           label="Accuracy" loading={loading} accent="#fbbf24"
-          value={t ? pct(t.accuracy) : "—"}
+          value={t?.submissions ? pct(t.accuracy) : "—"}
           sub="AC / total submission"
           icon={<Percent className="w-3.5 h-3.5" />}
         />
         <StatCard
           label="Streak" loading={loading} accent="#fb923c"
-          value={`${t?.streak ?? 0} hari`}
+          value={t ? `${t.streak} hari` : "—"}
           sub={`terpanjang ${t?.longestStreak ?? 0} hari`}
           icon={<Flame className="w-3.5 h-3.5" />}
         />
@@ -318,10 +393,16 @@ function AllProvidersView({
         {loading ? (
           <Skeleton className="h-[120px] w-full" />
         ) : withData.length === 0 ? (
-          <EmptyPanel
-            message="Belum ada provider tersync."
-            hint={<Link href="/connections" className="text-[12px] text-[#a78bfa] hover:underline">Ke Connections →</Link>}
-          />
+          data ? (
+            <EmptyPanel
+              message="Belum ada provider tersync."
+              hint={<Link href="/connections" className="text-[12px] text-[#a78bfa] hover:underline">Ke Connections →</Link>}
+            />
+          ) : (
+            // No overview at all means the fetch failed, so nothing is known about
+            // the linked judges — saying "belum ada" would be inventing an answer.
+            <EmptyPanel message="Data provider gagal dimuat." />
+          )
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {withData.map((p) => <ProviderCard key={p.provider} stats={p} />)}
@@ -340,16 +421,41 @@ function AllProvidersView({
           )}
         </Panel>
 
-        <Panel title="Problem Terpecahkan (kumulatif)" subtitle="Problem unik yang AC — TLX tidak mengekspos riwayat rating per kontes">
+        <Panel
+          title="Problem Terpecahkan (kumulatif)"
+          subtitle={`Problem unik yang AC${solveCurves.some(([k]) => isTLXFamily(k)) ? " — TLX tidak mengekspos riwayat rating per kontes" : ""}`}
+        >
           {loading ? (
             <Skeleton className="h-[200px] w-full" />
           ) : solveCurves.length > 0 ? (
-            <ProgressChart
-              id={`solve-${solveCurves[0][0]}`}
-              points={solveCurves[0][1]}
-              color={providerColor(solveCurves[0][0] === "local" ? "codeforces" : solveCurves[0][0])}
-              valueName="Solved"
-            />
+            // One chart per judge, each with its name above it. Drawing only the
+            // longest curve dropped every other judge's progress and left the line
+            // identified by colour alone — and since "local" is usually the longest,
+            // that unnamed line was often Codeforces under a TLX-flavoured subtitle.
+            <div className="space-y-3">
+              {solveCurves.map(([key, pts]) => {
+                const color = providerColor(key === "local" ? "codeforces" : key);
+                return (
+                  <div key={key}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ background: color }}
+                        aria-hidden="true"
+                      />
+                      <span className="text-[11px] text-[#a1a1aa] truncate">{curveLabel(key)}</span>
+                    </div>
+                    <ProgressChart
+                      id={`solve-${key}`}
+                      points={pts}
+                      color={color}
+                      valueName="Solved"
+                      height={solveCurves.length > 1 ? 140 : 200}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <EmptyPanel message="Belum cukup data solve untuk digambar." />
           )}
@@ -357,7 +463,7 @@ function AllProvidersView({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <TagPanel tags={tags} loading={loading} />
+        <TagPanel tags={tags} loading={tagsLoading} />
         <LocalRunsPanel data={data} loading={loading} />
       </div>
     </>
@@ -554,7 +660,7 @@ function LocalRunsPanel({ data, loading }: { data: DashboardOverview | null; loa
 }
 
 function SingleProviderView({
-  stats, loading, activity, series, solveSeries, tags,
+  stats, loading, activity, series, solveSeries, tags, tagsLoading,
 }: {
   stats: ProviderStats;
   loading: boolean;
@@ -562,11 +668,17 @@ function SingleProviderView({
   series: SeriesPoint[];
   solveSeries: SeriesPoint[];
   tags: TagStat[];
+  tagsLoading: boolean;
 }) {
   const isCF = stats.provider === "codeforces";
   const color = providerColor(stats.provider);
   const label = providerLabel(stats.provider, stats.handle, stats.displayName);
   const identity = accountIdentity(label, stats.handle, stats.providerUsername);
+  // Codeforces falls back to its local solve curve when the rating history is
+  // empty — an unrated handle, or a failed/rate-limited CF rating fetch, both of
+  // which come back as an empty slice. The panel has to retitle itself for that,
+  // otherwise a count of solved problems is presented as a rating.
+  const useSolve = series.length <= 1 && solveSeries.length > 1;
 
   return (
     <>
@@ -620,8 +732,14 @@ function SingleProviderView({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <Panel
-          title={isCF ? "Rating Progress" : "Problem Terpecahkan (kumulatif)"}
-          subtitle={isCF ? "Dari riwayat kontes Codeforces" : "Jumlah problem unik yang AC — TLX tidak mengekspos riwayat rating per kontes"}
+          title={isCF && !useSolve ? "Rating Progress" : "Problem Terpecahkan (kumulatif)"}
+          subtitle={
+            !isCF
+              ? "Jumlah problem unik yang AC — TLX tidak mengekspos riwayat rating per kontes"
+              : useSolve
+                ? "Riwayat rating kontes Codeforces belum ada — menampilkan problem unik yang AC"
+                : "Dari riwayat kontes Codeforces"
+          }
         >
           {loading ? (
             <Skeleton className="h-[200px] w-full" />
@@ -656,12 +774,12 @@ function SingleProviderView({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <LanguagePanel stats={stats} />
-        {isCF ? <DifficultyPanel stats={stats} /> : <TagPanel tags={tags} loading={loading} />}
+        {isCF ? <DifficultyPanel stats={stats} /> : <TagPanel tags={tags} loading={tagsLoading} />}
       </div>
 
       {isCF && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <TagPanel tags={tags} loading={loading} />
+          <TagPanel tags={tags} loading={tagsLoading} />
           <Panel title="Ringkasan" subtitle="Angka mentah untuk provider ini">
             <ProviderCard stats={stats} />
           </Panel>

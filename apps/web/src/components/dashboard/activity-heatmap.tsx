@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ActivityDay } from "@/lib/api/dashboard";
 
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ["Sen", "", "Rab", "", "Jum", "", "Min"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+// Cells are laid out with gridAutoFlow: "column", so DOM order is day-sequential
+// and every column is one week: up/down moves a day, left/right moves a week.
+const ARROW_STEP: Record<string, number> = { ArrowUp: -1, ArrowDown: 1, ArrowLeft: -7, ArrowRight: 7 };
 
 function level(count: number, max: number) {
   if (count <= 0) return 0;
@@ -64,14 +68,21 @@ export default function ActivityHeatmap({
     }
 
     // One label per month, placed on the column where that month first appears.
+    // The grid always starts on a Monday, so days 1-7 of a month fall in a single
+    // column only when the 1st is a Monday; otherwise two columns each hold a day
+    // <= 7. Dropping duplicates per column let both of them through, and two 9px
+    // labels one 14px pitch apart collided into "AprApr". Cells are in ascending
+    // date order, so remembering the last month is enough.
     const monthMarks: Array<{ col: number; label: string }> = [];
+    let lastMonthKey = "";
     cells.forEach((cell, i) => {
       if (!cell) return;
       const d = new Date(cell.date + "T00:00:00Z");
       if (d.getUTCDate() > 7) return;
-      const col = Math.floor(i / 7);
-      if (monthMarks.some((m) => m.col === col)) return;
-      monthMarks.push({ col, label: MONTHS[d.getUTCMonth()] });
+      const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+      if (key === lastMonthKey) return;
+      lastMonthKey = key;
+      monthMarks.push({ col: Math.floor(i / 7), label: MONTHS[d.getUTCMonth()] });
     });
 
     return { cells, max, monthMarks, totalSubs, activeDays };
@@ -79,6 +90,20 @@ export default function ActivityHeatmap({
 
   const columns = Math.ceil(cells.length / 7);
   const active = hover ? cells.find((c) => c?.date === hover) : null;
+
+  // One tab stop for the whole grid, starting on today and moved with the arrow
+  // keys. Every cell used to carry tabIndex={-1}, so the per-day counts were
+  // reachable by mouse only; making all 182 of them tabbable instead would cost a
+  // keyboard user 182 Tab presses to cross one widget.
+  const [focusIdx, setFocusIdx] = useState(cells.length - 1);
+  const focus = Math.min(Math.max(focusIdx, 0), cells.length - 1);
+  const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  function moveFocus(step: number) {
+    const next = Math.min(Math.max(focus + step, 0), cells.length - 1);
+    setFocusIdx(next);
+    cellRefs.current[next]?.focus();
+  }
 
   return (
     <div>
@@ -123,18 +148,30 @@ export default function ActivityHeatmap({
             <div
               className="grid grid-rows-7 gap-[3px]"
               style={{ gridAutoFlow: "column", gridTemplateColumns: `repeat(${columns}, 11px)` }}
-              role="img"
+              // role="img" made every cell a presentational child, so neither the
+              // titles nor the per-day labels below reached the accessibility tree.
+              role="group"
               aria-label={`Aktivitas ${weeks} minggu terakhir: ${totalSubs} submission dalam ${activeDays} hari aktif`}
+              onKeyDown={(e) => {
+                const step = ARROW_STEP[e.key];
+                if (!step) return;
+                e.preventDefault();
+                moveFocus(step);
+              }}
             >
               {cells.map((cell, i) =>
                 cell ? (
                   <button
                     key={cell.date}
                     type="button"
-                    tabIndex={-1}
+                    ref={(el) => { cellRefs.current[i] = el; }}
+                    tabIndex={i === focus ? 0 : -1}
                     onMouseEnter={() => setHover(cell.date)}
                     onMouseLeave={() => setHover(null)}
+                    onFocus={() => { setFocusIdx(i); setHover(cell.date); }}
+                    onBlur={() => setHover(null)}
                     title={`${cell.date}: ${cell.count} submission, ${cell.solved} AC`}
+                    aria-label={`${cell.date}: ${cell.count} submission, ${cell.solved} AC`}
                     className="w-[11px] h-[11px] rounded-[2px] cursor-default"
                     style={{ background: LEVEL_BG[level(cell.count, max)] }}
                   />

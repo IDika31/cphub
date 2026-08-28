@@ -124,4 +124,3 @@ func TestLiveBrowserSolver(t *testing.T) {
 		t.Logf("clearance UA: %s", ua)
 	}
 }
-

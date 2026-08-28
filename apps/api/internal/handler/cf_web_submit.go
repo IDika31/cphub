@@ -61,6 +61,16 @@ func (h *CFWebHandler) Submit(c *fiber.Ctx) error {
 	}
 
 	verdict, subID, runtime, memory := h.pollVerdict(account.Handle, problem.ProblemID, lastID)
+	// Same guard ObserveSubmit uses: a submission the poll never saw has no id, and
+	// filing it as submission_id "0" would be a phantom row that also collides with
+	// the unique index the next time it happens. The code is on Codeforces either
+	// way, so the reply points the user at their own submissions page.
+	if subID == 0 {
+		log.Printf("[cf-web] %s submitted %s but no submission id appeared within the poll window", account.Handle, problem.ProblemID)
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{
+			"error": "submit terkirim tapi belum terlihat di Codeforces — cek halaman submissions kamu",
+		})
+	}
 
 	h.recordCFSubmission(uid, problem, in.Language, verdict, subID, runtime, memory)
 	log.Printf("[cf-web] %s submitted %s as lang %s → %s (id=%d)", account.Handle, problem.ProblemID, langID, verdict, subID)
@@ -109,6 +119,11 @@ func (h *CFWebHandler) resolveCFProblem(problemID string) (model.Problem, int, s
 // logged rather than returned: the code is already on Codeforces, so telling the user
 // the submit failed would be a lie.
 func (h *CFWebHandler) recordCFSubmission(uid uuid.UUID, problem model.Problem, language, verdict string, subID, runtime int, memory int64) {
+	// Wall clock, because the judge's own timestamp is not in hand here: the poll
+	// returns within half a minute of the submit, which is far finer than anything
+	// reads this at. Left NULL, the row sorted below every synced one in the history
+	// list ("submitted_at DESC NULLS LAST") and printed "—" for its time.
+	now := time.Now()
 	extSub := &model.ExternalSubmission{
 		UserID:       uid,
 		ProblemID:    problem.ID,
@@ -121,6 +136,7 @@ func (h *CFWebHandler) recordCFSubmission(uid uuid.UUID, problem model.Problem, 
 		Verdict:      verdict,
 		Runtime:      runtime,
 		Memory:       int(memory / 1024),
+		SubmittedAt:  &now,
 	}
 	if err := h.db.Create(extSub).Error; err != nil {
 		log.Printf("[cf-web] failed to record submission %d: %v", subID, err)

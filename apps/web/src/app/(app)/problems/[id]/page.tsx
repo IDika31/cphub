@@ -5,7 +5,7 @@ import type { editor as MonacoEditorNS } from "monaco-editor";
 import { useParams } from "next/navigation";
 import { Play, RotateCcw, FileCode, Plus, Trash2, UploadCloud, Search } from "lucide-react";
 import Topbar from "@/components/shell/topbar";
-import { VerdictBadge } from "@/components/ui/badge";
+import Badge, { VerdictBadge } from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 import Select from "@/components/ui/select";
 import MonacoEditor from "@/components/editor/monaco-editor";
@@ -52,6 +52,7 @@ export default function ProblemDetailPage() {
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<SubmitTLXResult | null>(null);
+  const [submitError, setSubmitError] = useState("");
   const [popupOpen, setPopupOpen] = useState(false);
   const [tab, setTab] = useState<"grader" | "testcases">("grader");
   // Pane sizes live here as percentages so the ratio survives a window resize.
@@ -60,6 +61,13 @@ export default function ProblemDetailPage() {
   const rowRef = useRef<HTMLDivElement>(null);
   const colRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
+  // Persistence keys must not depend on how the user got here. The Problemset links
+  // to /problems/<uuid>, the extension deep-links /problems/<cfRef>, and the fetch
+  // below accepts either — so keying storage on the raw param gave the same problem
+  // two independent buffers and work written from one entry point was invisible from
+  // the other. Held in a ref, not state, so the debounced saver is not recreated
+  // (dropping its pending timer) when the fetch resolves.
+  const keyIdRef = useRef(id);
   const [customTests, setCustomTests] = useState<{ input: string; output: string }[]>([]);
   const [algoOpen, setAlgoOpen] = useState(false);
   const { addToast } = useToast();
@@ -91,7 +99,43 @@ export default function ProblemDetailPage() {
 
   function persistCustomTests(next: { input: string; output: string }[]) {
     setCustomTests(next);
-    if (id) localStorage.setItem(`cphub_customtests_${id}`, JSON.stringify(next));
+    const target = keyIdRef.current || id;
+    if (target) localStorage.setItem(`cphub_customtests_${target}`, JSON.stringify(next));
+  }
+
+  // Switch persistence to the problem's own id and copy the param-keyed buffers
+  // forward once. Both keys can hold work — the two entry paths wrote them
+  // independently — so the canonical copy wins and the legacy one is only read when
+  // there is nothing under the canonical key yet.
+  function adoptCanonicalId(canonical: string) {
+    keyIdRef.current = canonical;
+    if (canonical === id) return;
+    try {
+      const canonicalRaw = localStorage.getItem(`cphub_customtests_${canonical}`);
+      const legacyRaw = localStorage.getItem(`cphub_customtests_${id}`);
+      if (canonicalRaw) {
+        setCustomTests(JSON.parse(canonicalRaw) as { input: string; output: string }[]);
+      } else if (legacyRaw) {
+        localStorage.setItem(`cphub_customtests_${canonical}`, legacyRaw);
+        setCustomTests(JSON.parse(legacyRaw) as { input: string; output: string }[]);
+      }
+    } catch {
+      // A corrupt buffer is not worth failing the page load over.
+    }
+  }
+
+  // Per (problem, language), because the legacy key holds a separate buffer for each
+  // language: read the canonical buffer, else adopt the param-keyed one.
+  function loadCodeFor(canonical: string, lang: string) {
+    let saved = loadFromLocalStorage(canonical, lang);
+    if (!saved && canonical !== id) {
+      const legacy = loadFromLocalStorage(id, lang);
+      if (legacy) {
+        saveToLocalStorage(canonical, lang, legacy);
+        saved = legacy;
+      }
+    }
+    return saved;
   }
 
   function addCustomTest() {
@@ -112,6 +156,7 @@ export default function ProblemDetailPage() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+    keyIdRef.current = id;
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(id);
     const token = getToken();
     const promise = isUuid
@@ -121,7 +166,9 @@ export default function ProblemDetailPage() {
       .then((raw) => {
         const p = raw as Problem;
         setProblem(p);
-        const saved = loadFromLocalStorage(id, language);
+        const canonical = p.id || id;
+        adoptCanonicalId(canonical);
+        const saved = loadCodeFor(canonical, language);
         // Ignore saved code that still has raw placeholders (from buggy version)
         const hasPlaceholders = saved && /\{(provider|problemId|title|problemGroup)\}/.test(saved);
         if (saved && !hasPlaceholders) {
@@ -137,9 +184,29 @@ export default function ProblemDetailPage() {
           setCode(applyTemplate(tpl, vars));
         }
       })
-      .catch(() => {
-        // On error, at least load the template
-        setCode(getDefaultTemplate(language));
+      .catch((err) => {
+        // A failed load must never clobber the autosave buffer: localStorage is the
+        // only place the user's code lives, and one keystroke would persist the
+        // template over it 300ms later. Mirror the success branch instead — saved
+        // code first, template only when there is none. Not-in-DB problems 404 here
+        // and are still editable, so this path is a normal workflow, not an edge case.
+        const saved = loadCodeFor(keyIdRef.current || id, language);
+        const hasPlaceholders = saved && /\{(provider|problemId|title|problemGroup)\}/.test(saved);
+        if (saved && !hasPlaceholders) {
+          setCode(saved);
+        } else {
+          // Through applyTemplate, not the raw template: a raw {provider} left in the
+          // buffer is exactly what the guard above discards on the next good load.
+          setCode(
+            applyTemplate(getDefaultTemplate(language), {
+              provider: "cf",
+              problemId: id,
+              title: "",
+              problemGroup: "",
+            }),
+          );
+        }
+        addToast("error", `Gagal memuat problem: ${(err as Error).message || "cek koneksi & login"}`);
       })
       .finally(() => setLoading(false));
   }, [id]);
@@ -147,7 +214,8 @@ export default function ProblemDetailPage() {
   // Auto-save on code change (300ms debounce)
   const saveCode = useCallback(
     debounce((code: string, lang: string) => {
-      if (id) saveToLocalStorage(id, lang, code);
+      const target = keyIdRef.current || id;
+      if (target) saveToLocalStorage(target, lang, code);
     }, 300),
     [id],
   );
@@ -160,7 +228,7 @@ export default function ProblemDetailPage() {
   // Change language → load saved or template
   function handleLanguageChange(lang: string) {
     setLanguage(lang);
-    const saved = loadFromLocalStorage(id, lang);
+    const saved = loadCodeFor(keyIdRef.current || id, lang);
     setCode(saved || getDefaultTemplate(lang));
   }
 
@@ -205,6 +273,7 @@ export default function ProblemDetailPage() {
     if (!code.trim() || !problem) return;
     setSubmitting(true);
     setSubmitResult(null);
+    setSubmitError("");
     setPopupOpen(true);
     try {
       // Codeforces has no submit API. The extension posts the form from the user's
@@ -234,6 +303,7 @@ export default function ProblemDetailPage() {
         pending: false,
         url: "",
       });
+      setSubmitError((err as Error).message || "");
       addToast("error", `Submit gagal: ${(err as Error).message || "cek koneksi & akun di Connections"}`);
     }
     setSubmitting(false);
@@ -278,11 +348,12 @@ export default function ProblemDetailPage() {
     };
     const newCode = applyTemplate(tpl, vars);
     setCode(newCode);
-    if (id) saveToLocalStorage(id, language, newCode);
+    const target = keyIdRef.current || id;
+    if (target) saveToLocalStorage(target, language, newCode);
   }
 
   function handleReset() {
-    const saved = loadFromLocalStorage(id, language);
+    const saved = loadCodeFor(keyIdRef.current || id, language);
     if (saved) {
       setCode(saved);
     } else {
@@ -340,8 +411,16 @@ export default function ProblemDetailPage() {
             )}
             {submitResult && (
               submitResult.verdict === "ERR" ? (
-                <button onClick={() => setPopupOpen(true)}>
-                  <VerdictBadge verdict="RE" />
+                // Not a judge verdict — the submit never reached the judge. This used
+                // to render VerdictBadge "RE", which is this app's real Runtime Error
+                // verdict (grader/languages.go), so an expired Codeforces session was
+                // displayed as a crash on Codeforces. Still red: a failed submit
+                // should stay alarming, it is the label that was the lie.
+                <button
+                  onClick={() => setPopupOpen(true)}
+                  title={submitError || "Submit gagal — klik untuk detail"}
+                >
+                  <Badge variant="verdict-re">Gagal kirim</Badge>
                 </button>
               ) : submitResult.pending ? (
                 <button onClick={() => setPopupOpen(true)}>
@@ -499,12 +578,18 @@ export default function ProblemDetailPage() {
                           {r.memory > 0 && ` · ${formatKB(r.memory)}`}
                         </span>
                       </div>
-                      {r.verdict !== "AC" && (
-                        <div className="grid grid-cols-2 gap-2 text-[11px]">
-                          <div>
-                            <div className="text-[#ef4444] mb-1 text-[10px] font-semibold">Expected</div>
-                            <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[8px] rounded-[4px] font-mono max-h-[120px] overflow-y-auto">{r.expected}</pre>
-                          </div>
+                      {/* A case with no expected output is not judged at all (see the
+                          grader handler), so it comes back AC — but printing nothing
+                          would hide the very stdout the user pressed Run to read. Show
+                          Got on its own, without an empty red Expected box. */}
+                      {(r.verdict !== "AC" || r.expected.trim() === "") && (
+                        <div className={`grid ${r.expected.trim() === "" ? "grid-cols-1" : "grid-cols-2"} gap-2 text-[11px]`}>
+                          {r.expected.trim() !== "" && (
+                            <div>
+                              <div className="text-[#ef4444] mb-1 text-[10px] font-semibold">Expected</div>
+                              <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[8px] rounded-[4px] font-mono max-h-[120px] overflow-y-auto">{r.expected}</pre>
+                            </div>
+                          )}
                           <div>
                             <div className="text-[#10b981] mb-1 text-[10px] font-semibold">Got</div>
                             <pre className="text-[#e4e4e7] whitespace-pre-wrap bg-[#0f0f10] p-[8px] rounded-[4px] font-mono max-h-[120px] overflow-y-auto">{r.output}</pre>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Files, X } from "lucide-react";
+import { Search, Files, X, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import Topbar from "@/components/shell/topbar";
 import Badge from "@/components/ui/badge";
@@ -32,6 +32,12 @@ function parseTags(raw: string): string[] {
 
 const TD_STATUS = "py-[10px] px-[14px] whitespace-nowrap";
 
+// The API pages at 50 by default. Asking for it explicitly is what makes the
+// count line and the prev/next arithmetic below agree with the rows on screen —
+// without a page parameter the table showed the first 50 of a ten-thousand-row
+// problemset with the full total printed underneath and no way to go further.
+const PAGE_SIZE = 50;
+
 function ProblemsetContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -39,12 +45,21 @@ function ProblemsetContent() {
   const [provider, setProvider] = useState(initialProvider);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  // Bumped by the retry button so the load effect runs again with the same filters.
+  const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState("");
   const [importModalOpen, setImportModalOpen] = useState(false);
 
+  // The page is reset wherever the query itself changes — here, in the provider
+  // chip and in the debounce below — rather than in an effect on [provider,
+  // debounced]: `page` is a fetch dependency, so an effect would fire a second
+  // request for every filter change.
   useEffect(() => {
     setProvider(searchParams.get("provider") || "");
+    setPage(1);
   }, [searchParams]);
 
   // Search is debounced and sent to the server, so it covers the whole table
@@ -52,17 +67,25 @@ function ProblemsetContent() {
   // just to keep the visible list in sync while a request is in flight.
   const [debounced, setDebounced] = useState("");
   useEffect(() => {
-    const id = setTimeout(() => setDebounced(search.trim()), 300);
+    const id = setTimeout(() => { setDebounced(search.trim()); setPage(1); }, 300);
     return () => clearTimeout(id);
   }, [search]);
 
   useEffect(() => {
     setLoading(true);
-    fetchProblems({ provider: provider || undefined, q: debounced || undefined })
+    setError("");
+    fetchProblems({ page, limit: PAGE_SIZE, provider: provider || undefined, q: debounced || undefined })
       .then((res) => { setProblems(res.data); setTotal(res.total); })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        // A failed request used to be swallowed, so a dead API or an expired token
+        // rendered the "nothing synced yet" state — telling a user with ten thousand
+        // synced problems to sync them. The server's own message is shown instead.
+        setProblems([]);
+        setTotal(0);
+        setError((err as Error).message || "Gagal memuat problem");
+      })
       .finally(() => setLoading(false));
-  }, [provider, debounced]);
+  }, [provider, debounced, page, reloadKey]);
 
   const query = search.trim().toLowerCase();
   const visible = useMemo(() => {
@@ -75,6 +98,20 @@ function ProblemsetContent() {
       return haystack.includes(query);
     });
   }, [problems, query]);
+
+  const offset = (page - 1) * PAGE_SIZE;
+  // `total` is the whole filtered count, not this page's size, so it is printed as
+  // a range. The range counts problems.length — what the server sent for this page
+  // — and not visible.length, which is the client-filtered subset and would make
+  // the offset arithmetic lie while the 300 ms debounce catches up. For the same
+  // reason a count is only labelled "hasil" once the request for that query landed.
+  const countSuffix = query ? ` hasil untuk "${search.trim()}"` : " problem";
+  const countLabel =
+    query && debounced.toLowerCase() !== query
+      ? `${visible.length} tampil`
+      : problems.length === 0
+        ? `0${countSuffix}`
+        : `${offset + 1}–${offset + problems.length} dari ${total}${countSuffix}`;
 
   return (
     <>
@@ -117,7 +154,7 @@ function ProblemsetContent() {
           {PROVIDERS.map((p) => (
             <button
               key={p.value}
-              onClick={() => { setProvider(p.value); router.push(`/problems${p.value ? `?provider=${p.value}` : ""}`); }}
+              onClick={() => { setProvider(p.value); setPage(1); router.push(`/problems${p.value ? `?provider=${p.value}` : ""}`); }}
               aria-pressed={provider === p.value}
               className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
                 provider === p.value ? "bg-[#7c3aed] text-white" : "bg-[#1f1f23] text-[#a1a1aa] hover:text-[#e4e4e7] border border-[rgba(255,255,255,0.08)]"
@@ -128,8 +165,19 @@ function ProblemsetContent() {
           ))}
         </div>
 
+        {error && (
+          <p role="alert" className="text-[12px] text-[#f87171] mb-3">{error}</p>
+        )}
+
         {loading ? (
           <TableSkeleton rows={5} cols={5} />
+        ) : error ? (
+          <EmptyState
+            icon={<AlertTriangle className="w-8 h-8" />}
+            title="Gagal memuat problem"
+            description="API-nya mungkin sedang tidak jalan, atau sesi kamu sudah kedaluwarsa — coba lagi, dan login ulang kalau tetap gagal."
+            action={<Button variant="default" onClick={() => setReloadKey((k) => k + 1)}>Coba lagi</Button>}
+          />
         ) : visible.length === 0 && query ? (
           <EmptyState
             icon={<Search className="w-8 h-8" />}
@@ -200,11 +248,23 @@ function ProblemsetContent() {
             </table>
           </div>
         )}
-        {!loading && (total > 0 || query) && (
-          <p className="text-[11px] text-[#a1a1aa] mt-2 text-right" aria-live="polite">
-            {query ? `${total} hasil untuk "${search.trim()}"` : `${total} problem`}
-            {provider ? ` · ${PROVIDERS.find((p) => p.value === provider)?.label ?? provider}` : ""}
-          </p>
+        {!loading && !error && (total > 0 || query) && (
+          <div className="flex items-center justify-end gap-2 mt-2">
+            <p className="text-[11px] text-[#a1a1aa]" aria-live="polite">
+              {countLabel}
+              {provider ? ` · ${PROVIDERS.find((p) => p.value === provider)?.label ?? provider}` : ""}
+            </p>
+            {(page > 1 || page * PAGE_SIZE < total) && (
+              <div className="flex items-center gap-1">
+                <Button variant="default" disabled={page <= 1} onClick={() => setPage((n) => Math.max(1, n - 1))}>
+                  Sebelumnya
+                </Button>
+                <Button variant="default" disabled={page * PAGE_SIZE >= total} onClick={() => setPage((n) => n + 1)}>
+                  Berikutnya
+                </Button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </>

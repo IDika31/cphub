@@ -16,15 +16,25 @@ interface SubmitPopupProps {
   url?: string;
 }
 
+// Keys are the canonical verdicts normalizeVerdict emits (dashboard_verdict.go) —
+// all of them. MLE, PARTIAL and OTHER were missing, so a real memory-limit result
+// fell through to defaultVerdict and rendered as a grey clock headlined "Unknown"
+// with "MLE" printed two rows below it. ERR is CPHub's own: the submit never
+// reached the judge.
 const verdictConfig: Record<string, { bg: string; border: string; text: string; icon: typeof CheckCircle2; label: string }> = {
   AC: { bg: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.25)", text: "#34d399", icon: CheckCircle2, label: "Accepted" },
+  PARTIAL: { bg: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.25)", text: "#fbbf24", icon: Trophy, label: "Partial" },
   WA: { bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.25)", text: "#ef4444", icon: XCircle, label: "Wrong Answer" },
   TLE: { bg: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.25)", text: "#fbbf24", icon: Clock, label: "Time Limit Exceeded" },
+  // Clock would read as a time limit, which is the one thing this is not.
+  MLE: { bg: "rgba(251,146,60,0.10)", border: "rgba(251,146,60,0.25)", text: "#fb923c", icon: XCircle, label: "Memory Limit Exceeded" },
   RTE: { bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.25)", text: "#ef4444", icon: XCircle, label: "Runtime Error" },
   CE: { bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.25)", text: "#ef4444", icon: XCircle, label: "Compilation Error" },
+  OTHER: { bg: "rgba(113,113,122,0.10)", border: "rgba(113,113,122,0.25)", text: "#71717a", icon: XCircle, label: "Skipped / Other" },
   ERR: { bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.25)", text: "#ef4444", icon: XCircle, label: "Submit Error" },
 };
 
+// Last resort for a genuinely unknown string, not for a verdict the API can return.
 const defaultVerdict = { bg: "rgba(161,161,170,0.10)", border: "rgba(161,161,170,0.25)", text: "#a1a1aa", icon: Clock, label: "Unknown" };
 
 function langLabel(lang: string) {
