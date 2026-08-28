@@ -58,3 +58,5 @@ bun.lockb
 
 # graphify knowledge-graph output (tool artifact, regenerable)
 graphify-out/
+
+deploy/.cache/

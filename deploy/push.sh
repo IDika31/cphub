@@ -11,6 +11,10 @@
 #   ./deploy/push.sh --api-only        # skip the web build/upload
 #   ./deploy/push.sh --web-only        # skip the Go build/upload
 #   ./deploy/push.sh --no-migrate      # leave the database alone
+#   ./deploy/push.sh --force-build     # rebuild even when nothing changed
+#
+# A build is skipped when the sources that decide its output are byte-identical to
+# the ones the last build ran on. See fingerprint() below.
 #
 # Auth: an SSH key is expected. If you only have a password, export CPHUB_SSH_PW
 # and this script wires up an askpass helper for the session. The password is
@@ -36,12 +40,14 @@ REMOTE_DIR="${REMOTE_DIR:-cphub}"
 DO_API=1
 DO_WEB=1
 DO_MIGRATE=1
+FORCE_BUILD=0
 for arg in "$@"; do
   case "$arg" in
     --api-only) DO_WEB=0 ;;
     --web-only) DO_API=0 ;;
     --no-migrate) DO_MIGRATE=0 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --force-build) FORCE_BUILD=1 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -65,21 +71,99 @@ scpr() { scp $SSH_OPTS "$@"; }
 
 say() { printf '\n\033[1;35m==>\033[0m %s\n' "$*"; }
 
+# -- build fingerprints -------------------------------------------------------
+# A deploy usually changes one side. Rebuilding both anyway cost a minute of
+# `next build` every time -- and that build is the one step this project cannot run
+# on the server at all, since it wants ~1.5 GB on a box with 892 MB. So each build is
+# skipped when the sources that decide its output hash to what the last build already
+# ran on.
+#
+# Content, not timestamps: a checkout, an editor save or a OneDrive sync all touch
+# mtimes without changing a byte, so make-style staleness would rebuild on every one
+# of them -- and would still miss a revert that put a file back exactly as it was.
+CACHE="$ROOT/deploy/.cache"
+mkdir -p "$CACHE"
+
+# fingerprint hashes every file under the paths it is given, plus a caller-supplied
+# string for the toolchain: a Go or Node upgrade changes the output without changing a
+# source byte.
+#
+# -print0 piped through sort -z is what makes the hash comparable between runs and
+# between machines, because find follows the filesystem's own order. *.tsbuildinfo is
+# excluded: tsc rewrites it on every typecheck and it decides nothing about the output.
+fingerprint() {
+  local extra="$1"
+  shift
+  {
+    echo "$extra"
+    find "$@" -type f ! -name "*.tsbuildinfo" -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
+  } | sha256sum | cut -d" " -f1
+}
+
+api_fingerprint() {
+  fingerprint "api|$(go version 2>/dev/null || echo no-go)" apps/api/cmd apps/api/internal apps/api/go.mod apps/api/go.sum
+}
+
+web_fingerprint() {
+  local files=(apps/web/src apps/web/public apps/web/package.json apps/web/bun.lock apps/web/next.config.mjs apps/web/postcss.config.mjs apps/web/tailwind.config.ts apps/web/tsconfig.json)
+  # Next inlines NEXT_PUBLIC_* at build time, so an env file that exists is part of
+  # what the output depends on. Written as `if` rather than `[ ] &&` because a false
+  # test under `set -e` would end the script.
+  local candidate
+  for candidate in .env .env.local apps/web/.env apps/web/.env.local apps/web/.env.production; do
+    if [ -f "$candidate" ]; then files+=("$candidate"); fi
+  done
+  local present=()
+  for candidate in "${files[@]}"; do
+    if [ -e "$candidate" ]; then present+=("$candidate"); fi
+  done
+  fingerprint "web|$(node --version 2>/dev/null || echo no-node)|$(npm --version 2>/dev/null || echo no-npm)" "${present[@]}"
+}
+
 say "checking connectivity to $TARGET"
 sshr 'echo "  connected: $(whoami)@$(hostname)"'
 
 # ── build ────────────────────────────────────────────────────────────────────
 if [ "$DO_API" = 1 ]; then
-  say "cross-compiling the API for linux/amd64 (static, stripped)"
-  ( cd apps/api
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$STAGE/cphub-api" ./cmd
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$STAGE/cphub-migrate" ./cmd/migrate )
+  API_HASH="$(api_fingerprint)"
+  if [ "$FORCE_BUILD" = 0 ] && [ -f "$CACHE/api.hash" ] && [ -f "$CACHE/cphub-api" ] && [ -f "$CACHE/cphub-migrate" ] && [ "$(cat "$CACHE/api.hash")" = "$API_HASH" ]; then
+    say "API sources unchanged since the last build -- reusing those binaries"
+    cp "$CACHE/cphub-api" "$CACHE/cphub-migrate" "$STAGE/"
+  else
+    say "cross-compiling the API for linux/amd64 (static, stripped)"
+    ( cd apps/api
+      GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$STAGE/cphub-api" ./cmd
+      GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$STAGE/cphub-migrate" ./cmd/migrate )
+    # Cached only after both builds succeeded, so a failed compile cannot leave a
+    # hash claiming binaries that were never produced.
+    cp "$STAGE/cphub-api" "$STAGE/cphub-migrate" "$CACHE/"
+    echo "$API_HASH" > "$CACHE/api.hash"
+  fi
   ls -lh "$STAGE/cphub-api" "$STAGE/cphub-migrate" | awk '{print "  " $9, $5}'
 fi
 
 if [ "$DO_WEB" = 1 ]; then
-  say "building the web app locally"
-  ( cd apps/web && npm run build >/dev/null )
+  WEB_HASH="$(web_fingerprint)"
+  # The stamp lives inside .next so it cannot outlive the build it describes: deleting
+  # the directory deletes the claim that it is current.
+  WEB_STAMP="apps/web/.next/.cphub-src-hash"
+  if [ "$FORCE_BUILD" = 0 ] && [ -f apps/web/.next/BUILD_ID ] && [ -f "$WEB_STAMP" ] && [ "$(cat "$WEB_STAMP")" = "$WEB_HASH" ]; then
+    say "web sources unchanged since the last build -- reusing .next ($(cat apps/web/.next/BUILD_ID))"
+  else
+    say "building the web app locally"
+    # From scratch, deliberately. A .next left over from an earlier build is what made
+    # `next build` die in collect-build-traces looking for
+    # .next/server/pages/_app.js.nft.json -- a pages-router artefact this app has never
+    # produced. Measured 2026-08-28: the deploy aborted mid-build, and because the
+    # failure was hidden by >/dev/null it read as a silent stop.
+    rm -rf apps/web/.next
+    if ! ( cd apps/web && npm run build > "$STAGE/next-build.log" 2>&1 ); then
+      echo "  next build FAILED:" >&2
+      tail -25 "$STAGE/next-build.log" >&2
+      exit 1
+    fi
+    echo "$WEB_HASH" > "$WEB_STAMP"
+  fi
   # cache/ is a local build accelerator, ~400 MB, and useless on the server.
   tar czf "$STAGE/next.tar.gz" -C apps/web --exclude=cache .next
   echo "  .next payload: $(du -h "$STAGE/next.tar.gz" | cut -f1)"
