@@ -127,12 +127,30 @@ export async function syncCFSubmissions(): Promise<{
   return apiClient("/api/dashboard/sync-cf", { method: "POST" });
 }
 
-export async function syncTLXSubmissions(): Promise<{
+/** One entry per linked Judgels instance. The endpoint walks them all and answers 200
+ *  as soon as any of them fetched, so `error` here is the only place a partial failure
+ *  shows up — a self-hosted instance with an expired token otherwise stops advancing
+ *  behind a green toast. Every instance failing comes back 424 instead. */
+export interface TLXInstanceResult {
+  provider: string;
+  host: string;
+  submissions?: number;
+  fetched?: number;
+  rating?: number;
+  official?: { score: number; problemsTried: number; problemsSolved: number };
+  error?: string;
+}
+
+export interface TLXSyncResult {
   status: string;
   submissions: number;
   fetched: number;
   rating?: number;
   official?: { score: number; problemsTried: number; problemsSolved: number };
-}> {
+  /** Absent only from an older API build; the current one always lists the instances. */
+  instances?: TLXInstanceResult[];
+}
+
+export async function syncTLXSubmissions(): Promise<TLXSyncResult> {
   return apiClient("/api/dashboard/sync-tlx", { method: "POST" });
 }

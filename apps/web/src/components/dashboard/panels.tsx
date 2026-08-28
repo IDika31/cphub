@@ -56,7 +56,10 @@ export function StatCard({
       ) : (
         <div className="text-[26px] font-bold text-[#e4e4e7] leading-tight tabular-nums">{value}</div>
       )}
-      {sub && <div className="text-[11px] text-[#a1a1aa] mt-1 truncate">{sub}</div>}
+      {/* Hidden while loading, like the value above it. The sub line is built from the
+          same numbers, so leaving it up during the first request printed a confident
+          "0 solved" under a skeleton — a figure nobody had answered yet. */}
+      {!loading && sub && <div className="text-[11px] text-[#a1a1aa] mt-1 truncate">{sub}</div>}
     </div>
   );
 }

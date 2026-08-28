@@ -38,12 +38,6 @@ function pct(n: number) {
   return `${n.toFixed(n >= 10 ? 0 : 1)}%`;
 }
 
-/** One entry per linked Judgels instance, as POST /api/dashboard/sync-tlx returns
- *  it. `error` is set for the instances that failed; the request still answers 200
- *  as long as any instance fetched, so this list is the only place a partial
- *  failure surfaces. lib/api/dashboard.ts stops at the flat aggregate fields. */
-type TLXInstanceResult = { provider: string; host: string; error?: string };
-
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [activity, setActivity] = useState<ActivityDay[]>([]);
@@ -137,8 +131,7 @@ export default function DashboardPage() {
         // them fetched, listing the failures in `instances[]`. Reading them is the
         // only way a self-hosted instance with an expired token gets reported —
         // otherwise it silently stops advancing behind a green toast.
-        const failed = ((res as typeof res & { instances?: TLXInstanceResult[] }).instances ?? [])
-          .filter((i) => i.error);
+        const failed = (res.instances ?? []).filter((i) => i.error);
         if (failed.length > 0) {
           // "info", not "error": the counts above are real, the failure is partial.
           // Every instance failing comes back 424 and lands in the catch below.
