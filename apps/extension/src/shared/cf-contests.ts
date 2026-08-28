@@ -18,9 +18,11 @@ export interface CFContestState {
    * Tri-state on purpose. `true` and `false` are things the page said; `undefined` means
    * it said nothing this parser understands, and the two must not be conflated: the
    * server DELETES a registration on `false`, so reporting "unreadable" as "not
-   * registered" erases a registration the user really has. A running round is exactly
-   * that case — once registration closes Codeforces stops printing "Registration
-   * completed" — and so is every row whose markup changes.
+   * registered" erases a registration the user really has.
+   *
+   * Measured on the real page: a past contest's last cell holds only the registrant-count
+   * link — no registration state at all — and /contests carries a hundred such rows per
+   * page. Reading those as "not registered" is what deleted registration history.
    */
   registered?: boolean;
   /** ISO instant when registration opens, when the page said it had not yet. Absent
@@ -91,10 +93,15 @@ function scrapeContestRows(): PageResult<RawContestRow[]> {
     const cell = cells[cells.length - 1];
     if (!cell) continue;
 
+    // The countdown's own title first. An open row's cell leads with the registrant-count
+    // link, whose title is the word "Registered" — first-titled-element-wins read that as
+    // a countdown.
+    const titled = cell.querySelector(".countdown [title]") ?? cell.querySelector("[title]");
+
     out.push({
       contestRef,
       cellText: (cell.textContent ?? "").replace(/\s+/g, " ").trim(),
-      countdownTitle: (cell.querySelector("[title]")?.getAttribute("title") ?? "").trim(),
+      countdownTitle: (titled?.getAttribute("title") ?? "").trim(),
       hasRegisterLink: !!cell.querySelector('a[href*="/contestRegistration/"]'),
     });
   }
@@ -104,12 +111,17 @@ function scrapeContestRows(): PageResult<RawContestRow[]> {
 /**
  * decideContestState turns one scraped row into a state.
  *
- * Every answer here is a phrase or an element the page actually carries. "Not registered"
- * used to be decided by elimination — neither known phrase present — and that was wrong
- * in a way that cost data: a running round, a past round and any markup change all land
- * in the same bucket, and the server deletes registrations on a `false`. So a row that
- * states nothing this function recognises now reports nothing, and the server leaves that
- * contest's record alone.
+ * Every answer here is a phrase or an element the page actually carries, all three
+ * measured on /contests while signed in:
+ *
+ *   registered      <span class="welldone">Registration completed</span>
+ *   not open yet    Before registration <span class="countdown"><span title="110:10:12">
+ *   open, not in    <a href="/contestRegistration/2258" class="red-link">Register »</a>
+ *
+ * "Not registered" used to be decided by elimination — neither phrase present — and that
+ * was wrong in a way that cost data: a past round states no registration at all, and the
+ * server deletes registrations on a `false`. So a row that states nothing this function
+ * recognises now reports nothing, and the server leaves that contest's record alone.
  *
  * `now` is a parameter so the conversion from Codeforces' relative countdown to an
  * absolute instant is checkable.
@@ -214,9 +226,14 @@ async function postRegistrationForm(contestId: number): Promise<PageResult<CFReg
   if (alreadyIn(html)) {
     return { ok: true, data: { registered: true, already: true } };
   }
+  // Codeforces says it in as many words on the page it redirects to:
+  //   Codeforces.showMessage("You have been successfully registered");
+  if (/You have been successfully registered/i.test(html)) {
+    return { ok: true, data: { registered: true, already: false } };
+  }
   const msg = rejection(html);
   if (msg) return { ok: false, error: `Codeforces menolak registrasi: ${msg}` };
-  // Off the form means accepted: Codeforces sends a successful registration to /contests.
+  // Off the form means accepted too: a taken registration lands on /contests.
   if (landed && landed !== path) {
     return { ok: true, data: { registered: true, already: false } };
   }

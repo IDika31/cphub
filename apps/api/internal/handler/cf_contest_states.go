@@ -26,10 +26,10 @@ import (
 //
 // Registered is a tri-state, and that is load-bearing: a nil means the page stated
 // nothing this parser understands, and such a row must be left alone rather than read as
-// "not registered", because the not-registered branch DELETES. A running round is exactly
-// that case — Codeforces drops "Registration completed" from the cell once registration
-// closes — so treating silence as a negative deleted the registration of every contest
-// the user was actually competing in.
+// "not registered", because the not-registered branch DELETES. Measured on the real page,
+// a past contest's row states no registration at all — its last cell is just the
+// registrant count — and /contests lists a hundred of those per page, so treating silence
+// as a negative wiped the user's registration history on the first sync.
 //
 // Authenticated by HMACVerify (the /api/sync group), so the caller is the paired
 // extension of exactly one account.

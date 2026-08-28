@@ -158,10 +158,10 @@ func TestContestStatesRejectsEmptyBody(t *testing.T) {
 	}
 }
 
-// The case that cost data. Codeforces stops printing "Registration completed" once
-// registration closes, so a round the user is competing in reads as unstated — and the old
-// parser reported that as `false`, which deleted the registration of every contest they
-// were actually in. An unstated row must change nothing.
+// The case that cost data. A past contest's row states no registration at all — measured,
+// its last cell holds only the registrant-count link — and /contests carries a hundred of
+// them per page. The old parser reported every one as `false`, which deleted the user's
+// registration history. An unstated row must change nothing.
 func TestContestStatesKeepsRegistrationWhenStateUnstated(t *testing.T) {
 	db := setupContestStateDB(t)
 	me := uuid.New()

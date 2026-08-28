@@ -9,9 +9,7 @@ import { decideContestState, type RawContestRow } from "../src/shared/cf-contest
  */
 const REGISTERED: RawContestRow = {
   contestRef: "2258",
-  cellText: "Registration completed x8308",
-  // The cell also holds the registrant-count link, whose img carries no title; the one
-  // title in a registered row belongs to nothing we read.
+  cellText: "Registration completed x10891",
   countdownTitle: "",
   hasRegisterLink: false,
 };
@@ -23,10 +21,13 @@ const NOT_OPEN_YET: RawContestRow = {
   hasRegisterLink: false,
 };
 
-// Registration open and this account not in it: Codeforces offers the link.
+// Registration open and this account not in it: Codeforces offers the link. Cell text as
+// the page renders it, registrant count and closing countdown included.
 const OPEN: RawContestRow = {
-  contestRef: "2261",
-  cellText: "Register »",
+  contestRef: "2258",
+  cellText: "Register » x10889 Until closing 38:39:28 *has extra registration",
+  // The registrant-count link carries title="Registered"; the scraper prefers the
+  // countdown's own title, and an open row has none.
   countdownTitle: "",
   hasRegisterLink: true,
 };
@@ -58,17 +59,17 @@ test("H in the countdown is hours, not a clock time", () => {
 });
 
 test("a registration link means open and not registered", () => {
-  expect(decideContestState(OPEN)).toEqual({ contestRef: "2261", registered: false });
+  expect(decideContestState(OPEN)).toEqual({ contestRef: "2258", registered: false });
 });
 
 /**
  * The row shapes that used to be read as "not registered" by elimination. The server
  * deletes a registration on a false, so each of these erased a registration the user
- * really had — a running round loses the "Registration completed" text the moment
- * registration closes, and a past round never had it.
+ * really had. The second string is a past contest's cell as the page renders it: the
+ * registrant count and nothing else, a hundred rows of it per page.
  */
 test("a row that states nothing reports nothing, not not-registered", () => {
-  for (const cellText of ["", "Enter »", "Virtual participation", "Final standings"]) {
+  for (const cellText of ["", "x25671", "Enter »", "Final standings"]) {
     const state = decideContestState({ contestRef: "2262", cellText, countdownTitle: "", hasRegisterLink: false });
     expect(state.registered).toBeUndefined();
     expect(state.contestRef).toBe("2262");
@@ -93,4 +94,16 @@ test("the contest ref survives verbatim", () => {
   // It is the join key against CPHub's own contest rows, so a mangled ref silently
   // detaches the state from its contest.
   expect(decideContestState({ ...OPEN, contestRef: "2260" }).contestRef).toBe("2260");
+});
+
+// A running contest keeps saying "Registration completed" — measured on 2251, mid-round —
+// so the contest list can still answer "am I in this one" while it runs.
+test("a running contest the account is in still reads as registered", () => {
+  const state = decideContestState({
+    contestRef: "2251",
+    cellText: "Registration completed x33635",
+    countdownTitle: "",
+    hasRegisterLink: false,
+  });
+  expect(state).toEqual({ contestRef: "2251", registered: true });
 });

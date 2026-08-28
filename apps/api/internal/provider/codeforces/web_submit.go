@@ -14,9 +14,19 @@ var (
 	// being carried as a table that silently rots.
 	langOptionRe  = regexp.MustCompile(`(?s)<option value="(\d+)"[^>]*>(.*?)</option>`)
 	langSelectRe  = regexp.MustCompile(`(?s)<select[^>]+name="programTypeId".*?</select>`)
-	hiddenInputRe = regexp.MustCompile(`<input[^>]+type="hidden"[^>]*>`)
-	attrRe        = regexp.MustCompile(`(\w+)="([^"]*)"`)
-	successMsgRe  = regexp.MustCompile(`(?s)Codeforces\.showMessage\("(.*?)"\)`)
+	// Both quote styles, because Codeforces' raw HTML mixes them: its own template
+	// emits <input type='hidden' name='csrf_token' …/> in single quotes while the rest
+	// of the page uses double. A browser's DOM hides that; this client reads the bytes.
+	hiddenInputRe = regexp.MustCompile(`<input[^>]+type=['"]hidden['"][^>]*>`)
+	// Radios and checkboxes the page pre-selected. The registration form's own
+	// "Take part: as individual participant" is one of these:
+	//   <input type="radio" id="takePartAsIndividualInput" name="takePartAs"
+	//          value="personal" checked="checked">
+	// and Codeforces' form JS refuses to submit without it, so replaying only the
+	// hidden inputs sent a registration missing the one field that says how to enter.
+	checkedInputRe = regexp.MustCompile(`<input[^>]+checked[^>]*>`)
+	attrRe         = regexp.MustCompile(`([\w-]+)=(?:"([^"]*)"|'([^']*)')`)
+	successMsgRe   = regexp.MustCompile(`(?s)Codeforces\.showMessage\("(.*?)"\)`)
 )
 
 type Language struct {
@@ -138,12 +148,18 @@ func (s *WebSession) RegisterContest(contestID int) (alreadyRegistered bool, err
 		"csrf_token": {csrf[1]},
 		"ftaa":       {s.ftaa},
 		"bfaa":       {s.bfaa},
-		"_tta":       {"176"},
 	}
-	for name, value := range hiddenInputs(body) {
+	for name, value := range formFields(body) {
 		if _, taken := form[name]; !taken {
 			form.Set(name, value)
 		}
+	}
+	// _tta is computed by Codeforces' own signForms() and INJECTED BY ITS JAVASCRIPT, so
+	// it is in the browser's DOM (measured at 689 on the registration page) and absent
+	// from the HTML this client reads. The page's value therefore wins where a real
+	// browser captured it, and the constant carries the scripted case.
+	if form.Get("_tta") == "" {
+		form.Set("_tta", "176")
 	}
 	resp, landedPost, err := s.postFormPage(path, form)
 	if err != nil {
@@ -165,8 +181,15 @@ func (s *WebSession) RegisterContest(contestID int) (alreadyRegistered bool, err
 	// registration, the contest list stopped offering the button, and the user found out
 	// they were not in the round when it started.
 	//
-	// Codeforces takes a registration by sending the browser off the form, so a reply from
-	// any other path is the marker.
+	// Codeforces says so in as many words on the page it redirects to — measured against
+	// contest 2258:
+	//   Codeforces.showMessage("You have been successfully registered");
+	if registeredNowRe.MatchString(resp) {
+		return false, nil
+	}
+	// And it takes a registration by sending the browser off the form, so a reply from any
+	// other path is the second marker. Kept alongside the message because the wording is
+	// localised while the redirect is not.
 	if landedPost != "" && landedPost != path {
 		return false, nil
 	}
@@ -184,24 +207,43 @@ func (s *WebSession) RegisterContest(contestID int) (alreadyRegistered bool, err
 	return false, s.describeMissingForm(path, landed, confirm, status)
 }
 
+// registeredNowRe is what Codeforces says on the page it lands on after taking a
+// registration. Exact wording, measured, so it cannot be confused with the "already
+// registered" case the caller reports differently.
+var registeredNowRe = regexp.MustCompile(`(?i)You have been successfully registered`)
+
 // registeredAlreadyRe matches the several ways Codeforces says "you are in this one".
 // The wording differs between an ordinary round and a contest with extra registration,
 // so this is deliberately loose rather than one exact sentence.
 var registeredAlreadyRe = regexp.MustCompile(`(?i)You have already registered|already registered for the contest|You are already registered`)
 
-// hiddenInputs collects every hidden field on a page, so a form can be replayed
-// without hardcoding its shape.
-func hiddenInputs(body string) map[string]string {
+// formFields collects what a browser would have sent from the page's own inputs: every
+// hidden field, plus every radio or checkbox the page arrived with already selected.
+//
+// Hidden-only was not enough. Measured on /contestRegistration/2258, the form is
+// csrf_token, action, backUrl, _tta — all hidden — AND takePartAs, a pre-checked radio.
+// A POST without takePartAs is a registration that says nothing about how the account
+// means to enter.
+func formFields(body string) map[string]string {
 	out := map[string]string{}
-	for _, tag := range hiddenInputRe.FindAllString(body, -1) {
-		attrs := map[string]string{}
-		for _, m := range attrRe.FindAllStringSubmatch(tag, -1) {
-			attrs[m[1]] = m[2]
-		}
-		if n := attrs["name"]; n != "" {
-			out[n] = attrs["value"]
+	collect := func(tags []string) {
+		for _, tag := range tags {
+			attrs := map[string]string{}
+			for _, m := range attrRe.FindAllStringSubmatch(tag, -1) {
+				// Whichever quote style matched; an empty value reads the same either way.
+				value := m[2]
+				if value == "" {
+					value = m[3]
+				}
+				attrs[m[1]] = value
+			}
+			if n := attrs["name"]; n != "" {
+				out[n] = attrs["value"]
+			}
 		}
 	}
+	collect(hiddenInputRe.FindAllString(body, -1))
+	collect(checkedInputRe.FindAllString(body, -1))
 	return out
 }
 
