@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from "@/stores/auth-store";
 import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
 import { fetchCFSessionStatus, CF_SESSION_EVENT } from "@/lib/api/codeforces";
+import { cfSessionStatusViaExtension } from "@/lib/extension-bridge";
 import { judgeNavEntries } from "@/lib/providers";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 
@@ -23,6 +24,9 @@ interface NavItem {
 
 // Only shown while it has something to do — see the cfSession effect below. It sits
 // between Contest and Submission because those two are what a dead session breaks.
+//
+// Reachable by URL whether or not the entry is there, and linked from the Codeforces
+// row in Connections, so hiding it never means hiding the way back.
 const VERIFY_CF_ITEM: NavItem = {
   href: "/verify-codeforces",
   label: "Verifikasi CF",
@@ -74,11 +78,21 @@ function SidebarInner({ onNavigate }: SidebarProps) {
       .catch(() => {});
   }, []);
 
-  // The verification entry appears only when a linked Codeforces account has stopped
-  // being usable, and disappears again the moment it works. Read on every navigation
-  // because that is when a stale answer would be visible, and it costs one indexed
-  // row: GET /api/cf/session answers from what the server already recorded, and only
-  // the verification page's own button asks Codeforces itself.
+  // The verification entry appears while a linked Codeforces account has no usable
+  // session, and disappears the moment it has one. Read on every navigation because
+  // that is when a stale answer would be visible, and it costs one indexed row:
+  // GET /api/cf/session answers from what the server already recorded.
+  //
+  // Two questions, because neither answers the whole thing:
+  //
+  //   - the server knows whether IT was refused. That flag only moves when something
+  //     tried to use the session, so a session that expired while nothing did still
+  //     reads as fine — which is exactly the case where this entry has to appear.
+  //   - this browser holds the cookie that actually proves a login. Asking the
+  //     extension for it is one cookie read: no tab, no request to Codeforces.
+  //
+  // So the entry shows when either says no, and the browser is only consulted when
+  // the server is satisfied — there is nothing to add once it already said no.
   //
   // Re-read on CF_SESSION_EVENT too, so finishing a verification empties the sidebar
   // without waiting for the next click.
@@ -86,8 +100,24 @@ function SidebarInner({ onNavigate }: SidebarProps) {
     let cancelled = false;
     const read = () => {
       fetchCFSessionStatus()
-        .then((s) => {
-          if (!cancelled) setCfNeedsVerify(s.linked && !s.valid);
+        .then(async (status) => {
+          if (cancelled) return;
+          if (!status.linked) {
+            // Nothing to verify, and nothing to nag a TLX-only user about.
+            setCfNeedsVerify(false);
+            return;
+          }
+          if (!status.valid) {
+            setCfNeedsVerify(true);
+            return;
+          }
+          try {
+            const browser = await cfSessionStatusViaExtension();
+            if (!cancelled) setCfNeedsVerify(!browser.loggedIn);
+          } catch {
+            // No extension in this browser, so the server's verdict is all there is.
+            if (!cancelled) setCfNeedsVerify(false);
+          }
         })
         .catch(() => {
           // An unreachable API is not evidence the session died.

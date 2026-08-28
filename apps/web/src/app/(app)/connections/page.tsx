@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState, useEffect, useId } from "react";
 import Topbar from "@/components/shell/topbar";
 import Button from "@/components/ui/button";
@@ -278,6 +280,18 @@ export default function ConnectionsPage() {
                 </div>
                 {p.connected && p.account ? (
                   <div className="flex items-center gap-2">
+                    {/* The sidebar only shows the verification entry while the session
+                        needs attention, which is right for a nav item and wrong as the
+                        only way in: re-verifying is also something a user decides to do
+                        on their own. This link is always here. */}
+                    {p.provider === "codeforces" && (
+                      <Link
+                        href="/verify-codeforces"
+                        className="text-[12px] text-[#8b5cf6] hover:underline px-2"
+                      >
+                        Verifikasi sesi
+                      </Link>
+                    )}
                     {p.provider === "tlx" && (
                       <Button variant="ghost" onClick={() => setTlxImportOpen(true)}>
                         Import Problem

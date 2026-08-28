@@ -15,6 +15,7 @@ import {
 import {
   hasExtension,
   loginCodeforcesViaExtension,
+  cfSessionStatusViaExtension,
   ExtensionMissingError,
 } from "@/lib/extension-bridge";
 
@@ -40,6 +41,11 @@ export default function VerifyCodeforcesPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"" | "verify" | "probe">("");
   const [ext, setExt] = useState<"checking" | "ready" | "absent">("checking");
+  // The cookie in THIS browser, which is the thing a verification actually produces.
+  // Kept beside the server's verdict rather than folded into it: the server only knows
+  // whether it was refused, so the two can honestly disagree — and when they do, that
+  // is the answer to "why is nothing telling me to re-verify".
+  const [browser, setBrowser] = useState<"checking" | "present" | "absent" | "unknown">("checking");
   const [error, setError] = useState("");
 
   const load = useCallback(async (probe = false) => {
@@ -62,8 +68,19 @@ export default function VerifyCodeforcesPage() {
     load().finally(() => {
       if (!cancelled) setLoading(false);
     });
-    hasExtension().then((present) => {
-      if (!cancelled) setExt(present ? "ready" : "absent");
+    hasExtension().then(async (present) => {
+      if (cancelled) return;
+      setExt(present ? "ready" : "absent");
+      if (!present) {
+        setBrowser("unknown");
+        return;
+      }
+      try {
+        const status = await cfSessionStatusViaExtension();
+        if (!cancelled) setBrowser(status.loggedIn ? "present" : "absent");
+      } catch {
+        if (!cancelled) setBrowser("unknown");
+      }
     });
     return () => {
       cancelled = true;
@@ -76,6 +93,12 @@ export default function VerifyCodeforcesPage() {
     try {
       const res = await loginCodeforcesViaExtension();
       const next = await load();
+      try {
+        const fresh = await cfSessionStatusViaExtension();
+        setBrowser(fresh.loggedIn ? "present" : "absent");
+      } catch {
+        setBrowser("unknown");
+      }
       addToast(
         "success",
         next?.valid
@@ -158,6 +181,16 @@ export default function VerifyCodeforcesPage() {
                       Terakhir dicek {new Date(status.checkedAt).toLocaleString("id-ID")}
                     </p>
                   )}
+                  <p className="text-[11px] text-[#71717a]">
+                    Sesi di browser ini:{" "}
+                    {browser === "checking"
+                      ? "mengecek..."
+                      : browser === "present"
+                        ? "terdeteksi"
+                        : browser === "absent"
+                          ? "tidak ada — verifikasi lagi supaya submit dari browser ini jalan"
+                          : "tidak bisa dibaca (extension belum ada)"}
+                  </p>
                 </div>
               </div>
             </div>
