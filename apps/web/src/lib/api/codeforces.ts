@@ -171,3 +171,31 @@ export async function registerContestPreferBrowser(
   const res = await registerContest(contestRef);
   return { registered: res.registered, already: res.already, via: "server" };
 }
+
+/** What CPHub knows about the browser session it holds for Codeforces.
+ *
+ *  `valid` is a stored verdict, not a live check: every server-side action flags the
+ *  account the moment Codeforces refuses it (markSessionExpired), so the sidebar can
+ *  ask this on every navigation without anyone touching codeforces.com. Pass
+ *  probe = true for the real thing — that costs a request to Codeforces and possibly
+ *  a Cloudflare solve, so it belongs behind a button the user pressed. */
+export interface CFSessionStatus {
+  linked: boolean;
+  valid: boolean;
+  handle?: string;
+  checkedAt?: string;
+  reason?: "not_linked" | "no_session" | "expired" | "unreachable" | "probe_failed";
+  detail?: string;
+}
+
+export async function fetchCFSessionStatus(probe = false): Promise<CFSessionStatus> {
+  return apiClient(`/api/cf/session${probe ? "?probe=1" : ""}`);
+}
+
+/** Fired after a verification round so the sidebar drops (or re-adds) its entry
+ *  without waiting for the next navigation. */
+export const CF_SESSION_EVENT = "cphub:cf-session-changed";
+
+export function announceCFSessionChange() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(CF_SESSION_EVENT));
+}

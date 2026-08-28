@@ -210,6 +210,7 @@ function webappBridgeFunc() {
     "CF_LANGUAGES",
     "CF_REGISTER",
     "CF_CONTEST_STATES",
+    "CF_STATEMENT",
     "CF_CHECK_VERDICT",
     "PING",
   ]);

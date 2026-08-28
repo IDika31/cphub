@@ -3,6 +3,7 @@ import { syncToAPI, pushCFSession, pushContestStates, type SyncPayload } from ".
 import { ensureCFLogin, peekCFSession } from "../shared/cf-session";
 import { submitCF, fetchCFLanguages, type CFSubmitRequest } from "../shared/cf-submit";
 import { readContestStates, registerContestInBrowser } from "../shared/cf-contests";
+import { fetchProblemStatement } from "../shared/cf-problem";
 import { pushToOfflineQueue, incrementSyncedCount } from "../shared/storage";
 import { updateBadge } from "./badge";
 import { logger } from "../shared/logger";
@@ -94,6 +95,16 @@ export async function handleMessage(
 				return { success: true, data: await registerContestInBrowser(contestId) };
 			} catch (err) {
 				logger.error("Codeforces registration failed", err);
+				return { success: false, error: (err as Error).message };
+			}
+		}
+		case MESSAGE_TYPES.CF_STATEMENT: {
+			const problemId = String((message.payload as unknown as { problemId?: string })?.problemId ?? "");
+			if (!problemId) return { success: false, error: "problemId wajib diisi" };
+			try {
+				return { success: true, data: await fetchProblemStatement(problemId) };
+			} catch (err) {
+				logger.error("Codeforces statement fetch failed", err);
 				return { success: false, error: (err as Error).message };
 			}
 		}

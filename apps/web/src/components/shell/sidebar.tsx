@@ -6,10 +6,11 @@ import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
-  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown, Plus, Trophy,
+  Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown, Plus, Trophy, ShieldAlert,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
+import { fetchCFSessionStatus, CF_SESSION_EVENT } from "@/lib/api/codeforces";
 import { judgeNavEntries } from "@/lib/providers";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
 
@@ -19,6 +20,14 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   hasSubmenu?: boolean;
 }
+
+// Only shown while it has something to do — see the cfSession effect below. It sits
+// between Contest and Submission because those two are what a dead session breaks.
+const VERIFY_CF_ITEM: NavItem = {
+  href: "/verify-codeforces",
+  label: "Verifikasi CF",
+  icon: ShieldAlert,
+};
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -49,6 +58,9 @@ function SidebarInner({ onNavigate }: SidebarProps) {
     () => new Set(NAV_ITEMS.filter((i) => i.hasSubmenu).map((i) => i.href)),
   );
   const [providers, setProviders] = useState<LinkedAccount[]>([]);
+  // null until the first answer, so the entry never flashes into view and out again
+  // for a user whose session is perfectly fine.
+  const [cfNeedsVerify, setCfNeedsVerify] = useState(false);
   const [importTLXOpen, setImportTLXOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -61,6 +73,40 @@ function SidebarInner({ onNavigate }: SidebarProps) {
       .then((res) => setProviders(res.data.filter((a) => a.isConnected)))
       .catch(() => {});
   }, []);
+
+  // The verification entry appears only when a linked Codeforces account has stopped
+  // being usable, and disappears again the moment it works. Read on every navigation
+  // because that is when a stale answer would be visible, and it costs one indexed
+  // row: GET /api/cf/session answers from what the server already recorded, and only
+  // the verification page's own button asks Codeforces itself.
+  //
+  // Re-read on CF_SESSION_EVENT too, so finishing a verification empties the sidebar
+  // without waiting for the next click.
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      fetchCFSessionStatus()
+        .then((s) => {
+          if (!cancelled) setCfNeedsVerify(s.linked && !s.valid);
+        })
+        .catch(() => {
+          // An unreachable API is not evidence the session died.
+        });
+    };
+    read();
+    window.addEventListener(CF_SESSION_EVENT, read);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CF_SESSION_EVENT, read);
+    };
+  }, [pathname]);
+
+  const navItems = useMemo(() => {
+    if (!cfNeedsVerify) return NAV_ITEMS;
+    const at = NAV_ITEMS.findIndex((i) => i.href === "/submissions");
+    const insertAt = at === -1 ? NAV_ITEMS.length : at;
+    return [...NAV_ITEMS.slice(0, insertAt), VERIFY_CF_ITEM, ...NAV_ITEMS.slice(insertAt)];
+  }, [cfNeedsVerify]);
 
   // The label used to be an inline ternary that fell through to the raw provider
   // string, so a self-hosted instance appeared in the nav as the literal
@@ -111,7 +157,7 @@ function SidebarInner({ onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex-1 p-[6px] space-y-[1px] overflow-y-auto" aria-label="Navigasi utama">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = pathname.startsWith(item.href);
           const isExpanded = expandedMenus.has(item.href);
 

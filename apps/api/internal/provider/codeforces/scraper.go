@@ -51,6 +51,26 @@ func (s *Scraper) FetchProblem(contestID, letter string) (*model.Problem, error)
 	return problem, nil
 }
 
+// ParseProblemHTML turns a problem page that somebody else fetched into a Problem
+// row. It exists because the cheapest way to get a Codeforces statement is not to
+// fetch it from the server at all: the user's own browser is already past the
+// Cloudflare gate, so the extension reads the page there and posts the HTML here.
+// Same parser either way — FetchProblem is this function plus a request.
+//
+// The two guards are the ones that matter when the bytes come from outside: a
+// Cloudflare interstitial and a login wall are both perfectly valid HTML, and writing
+// either one into the database would replace a statement with furniture.
+func ParseProblemHTML(problemID, pageURL, html string) (*model.Problem, error) {
+	if isCloudflareWall(html) {
+		return nil, fmt.Errorf("problem %s: the page sent was a Cloudflare challenge, not the statement", problemID)
+	}
+	problem := parseHTML(html, problemID, pageURL)
+	if problem.Title == "" && problem.Statement == "" {
+		return nil, fmt.Errorf("problem %s: no statement found in %d bytes of HTML", problemID, len(html))
+	}
+	return problem, nil
+}
+
 func parseHTML(html, problemID, pageURL string) *model.Problem {
 	// `.problem-statement` wraps the header, the body, the input/output specs, the
 	// samples AND the note. Handing the whole thing over as Statement while also

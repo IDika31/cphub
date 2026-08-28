@@ -42,4 +42,6 @@ export const MESSAGE_TYPES = {
   CF_LANGUAGES: "CF_LANGUAGES",
   CF_REGISTER: "CF_REGISTER",
   CF_CONTEST_STATES: "CF_CONTEST_STATES",
+  // Statements: the server would need a Cloudflare solve to read the same page.
+  CF_STATEMENT: "CF_STATEMENT",
 } as const;

@@ -110,6 +110,19 @@ export function syncContestStatesViaExtension(): Promise<{
   return callExtension("CF_CONTEST_STATES", undefined, 90_000);
 }
 
+/** Reads a Codeforces problem page in this browser and hands it to CPHub, which
+ *  parses and stores the statement.
+ *
+ *  Why the browser: the server can fetch the same page only by clearing a Cloudflare
+ *  managed challenge, and that costs a headless Chromium launch. Here the gate is
+ *  already cleared. Generous timeout — it opens a tab, waits for the page, and uploads
+ *  a few hundred kilobytes. */
+export function fetchStatementViaExtension(
+  problemId: string,
+): Promise<{ problemId: string; title: string; samples: number }> {
+  return callExtension("CF_STATEMENT", { problemId }, 90_000);
+}
+
 /** Submits from the user's browser, where the session and the Cloudflare clearance
  *  both already exist. Generous timeout: it opens a page, posts a form and reads the
  *  reply, all over Codeforces' own latency. */

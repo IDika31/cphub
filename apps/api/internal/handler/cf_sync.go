@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/IDika31/cphub/api/internal/model"
@@ -89,13 +91,83 @@ func (h *CFSyncHandler) SyncProblemset(c *fiber.Ctx) error {
 
 // SyncContests mirrors contest.list. Upcoming contests are included, which is what
 // makes a registration deadline visible before it passes.
+//
+// Kept as an endpoint for a deliberate refresh (and for anything scheduled), but the
+// contest list no longer needs anyone to press a button: ListContests refreshes
+// itself when what it holds has gone stale.
 func (h *CFSyncHandler) SyncContests(c *fiber.Ctx) error {
 	started := time.Now()
-	gym := c.QueryBool("gym", false)
-	list, err := h.api.ContestList(gym)
+	fetched, written, err := h.refreshContests(c.QueryBool("gym", false))
 	if err != nil {
 		log.Printf("[cf-sync] contest.list failed: %v", err)
 		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil daftar contest: " + err.Error()})
+	}
+	log.Printf("[cf-sync] contests: %d fetched, %d written in %s", fetched, written, time.Since(started).Round(time.Millisecond))
+	return c.JSON(fiber.Map{"fetched": fetched, "written": written, "elapsed": time.Since(started).Round(time.Millisecond).String()})
+}
+
+// contestFreshness is how old the stored contest list may be before a read
+// refreshes it. Fifteen minutes because the thing that actually moves is the phase
+// of a round about to start, and contest.list is one unauthenticated API call —
+// cheap enough to pay on a page open, far too expensive to pay on every one.
+const contestFreshness = 15 * time.Minute
+
+// contestRefresh serialises the self-refresh and remembers when it last ran, so a
+// page opened in three tabs at once makes one API call and not three. The attempt is
+// stamped whether it succeeds or fails: a Codeforces outage must not turn every
+// contest-list read into another timeout.
+var contestRefresh struct {
+	mu       sync.Mutex
+	lastTry  time.Time
+	inFlight bool
+}
+
+// refreshIfStale brings the stored contest list up to date when it has aged out.
+// Errors are logged and swallowed on purpose — the caller's job is to answer with
+// the contests it has, and a stale list is a better answer than a 502.
+func (h *CFSyncHandler) refreshIfStale() {
+	var newest *time.Time
+	if err := h.db.Model(&model.Contest{}).
+		Where("provider = ?", "codeforces").
+		Select("MAX(synced_at)").
+		Scan(&newest).Error; err != nil {
+		log.Printf("[cf-sync] could not read contest freshness: %v", err)
+		return
+	}
+	if newest != nil && time.Since(*newest) < contestFreshness {
+		return
+	}
+
+	contestRefresh.mu.Lock()
+	if contestRefresh.inFlight || time.Since(contestRefresh.lastTry) < contestFreshness {
+		contestRefresh.mu.Unlock()
+		return
+	}
+	contestRefresh.inFlight = true
+	contestRefresh.lastTry = time.Now()
+	contestRefresh.mu.Unlock()
+	defer func() {
+		contestRefresh.mu.Lock()
+		contestRefresh.inFlight = false
+		contestRefresh.mu.Unlock()
+	}()
+
+	started := time.Now()
+	fetched, written, err := h.refreshContests(false)
+	if err != nil {
+		log.Printf("[cf-sync] auto-refresh failed, serving what is stored: %v", err)
+		return
+	}
+	log.Printf("[cf-sync] contests auto-refreshed: %d fetched, %d written in %s",
+		fetched, written, time.Since(started).Round(time.Millisecond))
+}
+
+// refreshContests is the sync itself, without an HTTP request attached, so both the
+// endpoint and the staleness check above can run it.
+func (h *CFSyncHandler) refreshContests(gym bool) (fetched, written int, err error) {
+	list, err := h.api.ContestList(gym)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	now := time.Now()
@@ -121,28 +193,30 @@ func (h *CFSyncHandler) SyncContests(c *fiber.Ctx) error {
 			"name", "type", "phase", "frozen", "start_time", "duration_seconds", "url", "synced_at", "updated_at",
 		}),
 	}
-	written := 0
 	for start := 0; start < len(rows); start += 500 {
 		end := start + 500
 		if end > len(rows) {
 			end = len(rows)
 		}
 		batch := rows[start:end]
-		if err := h.db.Clauses(upsert).Create(&batch).Error; err != nil {
-			log.Printf("[cf-sync] contest batch %d failed: %v", start, err)
-			return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan contest", "written": written})
+		if wErr := h.db.Clauses(upsert).Create(&batch).Error; wErr != nil {
+			return len(list), written, fmt.Errorf("writing contest batch %d: %w", start, wErr)
 		}
 		written += len(batch)
 	}
-
-	log.Printf("[cf-sync] contests: %d fetched, %d written in %s", len(list), written, time.Since(started).Round(time.Millisecond))
-	return c.JSON(fiber.Map{"fetched": len(list), "written": written, "elapsed": time.Since(started).Round(time.Millisecond).String()})
+	return len(list), written, nil
 }
 
 // ListContests reads what was synced. `phase=BEFORE` is the upcoming set;
 // `upcoming=true` is the same thing expressed as a time filter, for contests whose
 // phase has not been refreshed recently.
 func (h *CFSyncHandler) ListContests(c *fiber.Ctx) error {
+	// Opening the page is the trigger; there is no Sync button any more. Inline
+	// rather than in a goroutine so the reply already carries the fresh phases —
+	// contest.list answers in well under a second, and refreshIfStale returns
+	// immediately when the list is young or another request is already refreshing.
+	h.refreshIfStale()
+
 	q := h.db.Model(&model.Contest{})
 	if p := c.Query("provider"); p != "" {
 		q = q.Where("provider = ?", p)

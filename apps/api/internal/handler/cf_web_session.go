@@ -55,7 +55,10 @@ func (h *CFWebHandler) cfSession(uid uuid.UUID) (*codeforces.WebSession, *model.
 
 	if account.PasswordEnc == "" || h.box == nil {
 		// No stored password to renew with — which is the normal case now that login
-		// happens in the user's browser. The extension is asked to log in again.
+		// happens in the user's browser. The extension is asked to log in again, and
+		// the account is flagged so the sidebar can offer the verification page
+		// without anyone having to ask Codeforces a second time.
+		h.markSessionExpired(uid)
 		return nil, nil, errCFSessionExpired
 	}
 	password, err := h.box.Open(account.PasswordEnc)
@@ -65,6 +68,7 @@ func (h *CFWebHandler) cfSession(uid uuid.UUID) (*codeforces.WebSession, *model.
 	handle, err := session.Login(account.Handle, password)
 	if err != nil {
 		// The saved password no longer works, so this is the user's problem again.
+		h.markSessionExpired(uid)
 		return nil, nil, fmt.Errorf("%w (login ulang otomatis gagal: %v)", errCFSessionExpired, err)
 	}
 	blob, _ := session.Export()

@@ -15,6 +15,7 @@ import Splitter from "@/components/editor/splitter";
 import SubmitPopup from "@/components/ui/submit-popup";
 import { useToast } from "@/components/ui/toast";
 import { fetchProblem } from "@/lib/api/problems";
+import { fetchStatementViaExtension } from "@/lib/extension-bridge";
 import { runCode, parseTimeLimitMs, parseMemoryLimitMb, type GraderResult } from "@/lib/api/grader";
 import { submitTLX, type SubmitTLXResult } from "@/lib/api/tlx";
 import { submitCFPreferBrowser } from "@/lib/api/codeforces";
@@ -166,6 +167,24 @@ export default function ProblemDetailPage() {
       .then((raw) => {
         const p = raw as Problem;
         setProblem(p);
+        // A Codeforces row synced from the problemset API carries rating and tags but
+        // no statement — the API has no method that returns one. Rather than have the
+        // server scrape it (a Cloudflare solve, i.e. a headless Chromium), this
+        // browser reads the page it can already reach and posts it to CPHub. Silent
+        // when there is no extension: the server keeps its own fallback, behind a
+        // cooldown.
+        if (p.provider === "codeforces" && !p.statement && p.problemId) {
+          fetchStatementViaExtension(p.problemId)
+            .then(() => {
+              // Only refresh what is still on screen; the user may have moved on
+              // while the tab loaded.
+              if (keyIdRef.current !== id) return;
+              return apiClient('/api/problems/by-problem-id/' + p.problemId, { token })
+                .then((fresh) => setProblem(fresh as Problem))
+                .catch(() => {/* the statement is stored; the next open will show it */});
+            })
+            .catch(() => {/* no extension, or Codeforces unreachable from this browser */});
+        }
         const canonical = p.id || id;
         adoptCanonicalId(canonical);
         const saved = loadCodeFor(canonical, language);

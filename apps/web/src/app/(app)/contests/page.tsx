@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Trophy, RefreshCw, Download, ExternalLink, CheckCircle2, Lock } from "lucide-react";
+import { Trophy, Download, ExternalLink, CheckCircle2, Lock } from "lucide-react";
 import Topbar from "@/components/shell/topbar";
 import Button from "@/components/ui/button";
 import Badge from "@/components/ui/badge";
 import Skeleton from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import {
-  fetchContests, syncCFContests, syncCFContestProblems, registerContestPreferBrowser, type Contest,
+  fetchContests, syncCFContestProblems, registerContestPreferBrowser, type Contest,
 } from "@/lib/api/codeforces";
 import { hasExtension, syncContestStatesViaExtension } from "@/lib/extension-bridge";
 
@@ -74,6 +74,10 @@ export default function ContestsPage() {
     }
   }, [upcomingOnly, addToast]);
 
+  // No Sync button: GET /api/contests refreshes itself from contest.list when what
+  // it holds has aged past fifteen minutes (see CFSyncHandler.refreshIfStale), so
+  // opening the page is the sync. One unauthenticated API call, shared by every
+  // reader in that window, instead of a button nobody could know when to press.
   useEffect(() => {
     load();
   }, [load]);
@@ -104,19 +108,6 @@ export default function ContestsPage() {
     // itself, and depending on load would chase its own tail.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function handleSync() {
-    setBusy("sync");
-    try {
-      const res = await syncCFContests();
-      addToast("success", `${res.written} contest tersimpan (${res.elapsed})`);
-      load();
-    } catch (err) {
-      addToast("error", `Sync contest gagal: ${(err as Error).message || "cek koneksi API"}`);
-    } finally {
-      setBusy("");
-    }
-  }
 
   async function handleRegister(c: Contest) {
     setBusy(c.id);
@@ -157,10 +148,6 @@ export default function ContestsPage() {
       <Topbar title="Contests">
         <Button variant="ghost" onClick={() => setUpcomingOnly((v) => !v)}>
           {upcomingOnly ? "Tampilkan semua" : "Hanya yang akan datang"}
-        </Button>
-        <Button variant="primary" onClick={handleSync} disabled={busy === "sync"}>
-          <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
-          {busy === "sync" ? "Sync..." : "Sync dari Codeforces"}
         </Button>
       </Topbar>
 

@@ -71,6 +71,19 @@ func activeSolver() cloudflare.Solver {
 }
 
 func cachedClearance() (value, ua string) {
+	if v, u := memoryClearance(); v != "" {
+		return v, u
+	}
+	// Nothing in this process. A clearance earned before the last restart may well
+	// still be live, so the durable store gets a look before a browser does — see
+	// clearance_store.go.
+	if loadStoredClearance() {
+		return memoryClearance()
+	}
+	return "", ""
+}
+
+func memoryClearance() (value, ua string) {
 	clearanceCache.mu.Lock()
 	defer clearanceCache.mu.Unlock()
 	// Half a pair is useless: a clearance cookie replayed under the wrong
@@ -105,6 +118,8 @@ func (c cachingSolver) Solve(ctx context.Context, target *url.URL, kind cloudfla
 		clearanceCache.mu.Lock()
 		clearanceCache.value, clearanceCache.ua = ck.Value, ua
 		clearanceCache.mu.Unlock()
+		// And durably, so the next process does not pay for this launch again.
+		storeClearance(ck.Value, ua)
 		break
 	}
 	return cookies, nil

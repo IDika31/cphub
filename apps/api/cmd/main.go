@@ -54,6 +54,11 @@ func main() {
 	_ = grader.StartupCheck()
 	grader.SetTuning(cfg.Grader.TimeGraceMS, cfg.Grader.SandboxOverheadMS)
 
+	// A clearance solved before this process started may still be live, so it is
+	// looked up in Redis before any browser is launched. Wired before the solver so
+	// the very first request of a fresh deploy can already replay it.
+	codeforces.SetClearanceStore(database.NewClearanceCache())
+
 	// Point Codeforces at a headless browser. It is what clears the Cloudflare
 	// managed challenge on codeforces.com, and therefore what makes the whole site
 	// usable rather than only the live contests the m1/m3 mirrors carry. A missing
@@ -170,6 +175,9 @@ func registerRoutes(
 	// Registration state read off Codeforces' own contest list in the user's browser —
 	// the only accurate source, since no read API exposes it.
 	sync.Post("/cf-contest-states", cfWebHandler.ContestStatesFromExtension)
+	// Statements come from the user's browser too: the server would have to clear a
+	// Cloudflare challenge to read the same page, and that costs a Chromium launch.
+	sync.Post("/cf-statement", problemHandler.StatementFromExtension)
 
 	// Problems (JWT protected)
 	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
@@ -234,6 +242,9 @@ func registerRoutes(
 	cf.Post("/contests/:id/problems/sync", cfSyncHandler.SyncContestProblems)
 
 	// Codeforces web session: the three things the official API has no method for.
+	// GET /session is what the sidebar and the verification page read — cheap by
+	// default, ?probe=1 for a real check the user asked for.
+	cf.Get("/session", cfWebHandler.SessionStatus)
 	cf.Post("/login", cfWebHandler.Login)
 	cf.Get("/languages", cfWebHandler.Languages)
 	cf.Post("/submit", cfWebHandler.Submit)

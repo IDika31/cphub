@@ -54,6 +54,46 @@ type BrowserSolver struct {
 
 	mu sync.Mutex
 	ua string
+	// profileDir is the reused Chromium profile. Created on the first solve and kept
+	// afterwards, so the challenge's cached scripts and cookies survive to the next
+	// one; see profile() for why that is worth a directory on disk.
+	profileDir string
+}
+
+// profile returns the reused Chromium profile directory, creating it once. Called
+// with b.solving held, which is also what makes reuse safe: Chromium takes an
+// exclusive lock on a profile, so two concurrent launches would fight over it.
+func (b *BrowserSolver) profile() (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.profileDir != "" {
+		if _, err := os.Stat(b.profileDir); err == nil {
+			return b.profileDir, nil
+		}
+		// Someone cleaned /tmp under us; fall through and make a new one.
+	}
+	// Under TempDir rather than the user's home: the production box runs the API as
+	// a service account whose home may be read-only, and a profile is disposable —
+	// losing it costs one slower solve, not a failure.
+	dir, err := os.MkdirTemp("", "cphub-cf-profile-")
+	if err != nil {
+		return "", fmt.Errorf("browser solver: profile dir: %w", err)
+	}
+	b.profileDir = dir
+	return dir, nil
+}
+
+// resetProfile throws the profile away after a launch that never came up, so the
+// next solve is not held back by whatever went wrong in it — a stale lock file, or a
+// half-written cache.
+func (b *BrowserSolver) resetProfile() {
+	b.mu.Lock()
+	dir := b.profileDir
+	b.profileDir = ""
+	b.mu.Unlock()
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // BrowserOptions configures the solver. The zero value autodetects a browser and
@@ -130,11 +170,15 @@ func (b *BrowserSolver) Solve(ctx context.Context, target *url.URL, _ Challenge,
 	ctx, cancel := context.WithTimeout(ctx, b.opts.Timeout)
 	defer cancel()
 
-	dir, err := os.MkdirTemp("", "cphub-cf-")
+	// The profile is reused across solves instead of thrown away. Chromium caches
+	// the challenge's own scripts and the cookies that came with them there, so a
+	// warm profile clears the gate in fewer round trips; a fresh one starts from
+	// nothing every time. Safe to share because b.solving above serialises launches —
+	// Chromium refuses to open a profile another instance holds.
+	dir, err := b.profile()
 	if err != nil {
-		return nil, fmt.Errorf("browser solver: profile dir: %w", err)
+		return nil, err
 	}
-	defer os.RemoveAll(dir)
 
 	cmd := exec.Command(b.path, b.args(dir)...)
 	// Chromium writes the port it chose into the profile dir, but it writes its
@@ -155,6 +199,10 @@ func (b *BrowserSolver) Solve(ctx context.Context, target *url.URL, _ Challenge,
 
 	port, err := waitDevToolsPort(ctx, dir, exited)
 	if err != nil {
+		// Most often a stale lock in the reused profile, or a Chromium that died on
+		// startup. Either way the directory is not trustworthy any more, and keeping
+		// it would make every later solve fail the same way.
+		b.resetProfile()
 		return nil, fmt.Errorf("%w (browser said: %s)", err, firstLine(stderr.String()))
 	}
 

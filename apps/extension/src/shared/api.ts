@@ -215,6 +215,40 @@ export async function pushContestStates(
   return (await res.json()) as ContestStateReceipt;
 }
 
+/** Hands CPHub a Codeforces problem page read in this browser. The server parses it
+ *  with the same parser its own scraper uses — see cf-problem.ts for why the fetch
+ *  happens here rather than there. */
+export async function pushProblemStatement(
+  problemId: string,
+  url: string,
+  html: string,
+): Promise<{ problemId: string; title: string; samples: number }> {
+  const key = await getExtensionKey();
+  if (!key) {
+    throw new Error("Extension belum dipasangkan — tempel pairing token dari CPHub Settings");
+  }
+  const apiUrl = await getApiUrl();
+  const body = JSON.stringify({ problemId, url, html });
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const signature = await generateHMAC(body, key.secret);
+
+  const res = await fetch(`${apiUrl}/api/sync/cf-statement`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Key-Id": key.keyId,
+      "X-HMAC-Signature": signature,
+      "X-Nonce": nonce,
+    },
+    body,
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    throw new HttpError((errorBody as { error?: string }).error || `HTTP ${res.status}`, res.status);
+  }
+  return (await res.json()) as { problemId: string; title: string; samples: number };
+}
+
 /** Custom Judgels/TLX hosts the user added in the extension. Pushed to CPHub so
  *  each one gets its own Connections entry instead of being invisible to the
  *  dashboard — the list is authoritative, so removing a host here unlinks it. */
