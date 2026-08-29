@@ -157,10 +157,21 @@ if [ "$DO_WEB" = 1 ]; then
     # produced. Measured 2026-08-28: the deploy aborted mid-build, and because the
     # failure was hidden by >/dev/null it read as a silent stop.
     rm -rf apps/web/.next
-    if ! ( cd apps/web && npm run build > "$STAGE/next-build.log" 2>&1 ); then
-      echo "  next build FAILED:" >&2
-      tail -25 "$STAGE/next-build.log" >&2
-      exit 1
+    build_web() { ( cd apps/web && npm run build > "$STAGE/next-build.log" 2>&1 ); }
+    if ! build_web; then
+      # One retry, from scratch again. Measured 2026-08-28: the build worker died with
+      # exit code 3221225794 -- 0xC0000374, STATUS_HEAP_CORRUPTION -- on sources that
+      # had built cleanly minutes earlier, and built cleanly again on the next attempt.
+      # That is a crash in the worker process, not a compile error, and retrying costs a
+      # minute against a whole deploy round trip.
+      echo "  next build failed, retrying once from a clean tree:" >&2
+      tail -5 "$STAGE/next-build.log" >&2
+      rm -rf apps/web/.next
+      if ! build_web; then
+        echo "  next build FAILED twice:" >&2
+        tail -25 "$STAGE/next-build.log" >&2
+        exit 1
+      fi
     fi
     echo "$WEB_HASH" > "$WEB_STAMP"
   fi
