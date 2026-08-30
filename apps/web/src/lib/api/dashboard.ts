@@ -154,3 +154,30 @@ export interface TLXSyncResult {
 export async function syncTLXSubmissions(): Promise<TLXSyncResult> {
   return apiClient("/api/dashboard/sync-tlx", { method: "POST" });
 }
+
+/** One problem worth opening next, with the reason it was picked. A list of problems
+ *  without a reason is a list nobody trusts, so the server sends one per row and the
+ *  basis for the whole set. */
+export interface Recommendation {
+  problemId: string;
+  title: string;
+  difficulty: number;
+  tags: string;
+  url: string;
+  /** A weak tag's name, or "level" when the pick was made on rating alone. */
+  reason: string;
+}
+
+export interface RecommendationBasis {
+  /** Where the rating band came from: the linked account, the user's solved problems, or
+   *  nothing at all. */
+  ratingFrom: "rating" | "solved" | "default";
+  band: [number, number];
+  weakTags: string[];
+}
+
+export async function fetchRecommendations(
+  limit = 8,
+): Promise<{ data: Recommendation[]; basis: RecommendationBasis }> {
+  return apiClient(`/api/dashboard/recommendations?limit=${limit}`);
+}

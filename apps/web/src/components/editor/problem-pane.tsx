@@ -1,8 +1,9 @@
 "use client";
 
-import { FileText, ExternalLink, ListChecks, Clock, Cpu } from "lucide-react";
+import { FileText, ExternalLink, ListChecks, Clock, Cpu, BookOpen } from "lucide-react";
 import Skeleton from "@/components/ui/skeleton";
 import ProblemStatement from "@/components/editor/problem-statement";
+import { parseMaterials } from "@/lib/api/problems";
 import type { Problem, TestCase } from "@/lib/api/types";
 
 interface ProblemPaneProps {
@@ -176,17 +177,35 @@ export default function ProblemPane({ problem, loading, sampleCount, onOpenTests
           </p>
         )}
 
-        {problem.url && (
-          <a
-            href={problem.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 mt-6 text-[12px] text-[#a78bfa] hover:text-[#c4b5fd] hover:underline rounded-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
-          >
-            Buka di {problem.provider || "sumber"}
-            <ExternalLink className="w-3 h-3" aria-hidden="true" />
-          </a>
-        )}
+        <div className="flex flex-col items-start gap-1.5 mt-6">
+          {problem.url && (
+            <a
+              href={problem.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[12px] text-[#a78bfa] hover:text-[#c4b5fd] hover:underline rounded-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
+            >
+              Buka di {problem.provider || "sumber"}
+              <ExternalLink className="w-3 h-3" aria-hidden="true" />
+            </a>
+          )}
+          {/* The editorial, when the provider printed one beside the problem. It rides
+              along with the statement upload rather than being fetched — see
+              extractMaterials — so it is simply absent for a round with no editorial
+              published yet, and for problems whose statement has never been read. */}
+          {parseMaterials(problem.materials).map((m) => (
+            <a
+              key={m.url}
+              href={m.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[12px] text-[#a1a1aa] hover:text-[#e4e4e7] hover:underline rounded-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b5cf6]"
+            >
+              <BookOpen className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+              <span className="truncate max-w-[42ch]">{m.title}</span>
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );

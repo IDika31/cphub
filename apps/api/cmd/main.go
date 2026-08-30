@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/IDika31/cphub/api/internal/config"
 	"github.com/IDika31/cphub/api/internal/database"
@@ -97,6 +98,10 @@ func main() {
 	tlxImportHandler := handler.NewTLXImportHandler(db, problemRepo)
 	tlxSubmitHandler := handler.NewTLXSubmitHandler(db, problemRepo, submissionRepo)
 	cfSyncHandler := handler.NewCFSyncHandler(db, cfg.CFAPIKey, cfg.CFAPISecret)
+	// Two things a problem page needs that belong to the reader rather than to the
+	// shared problem row: their own notes, and their own run history.
+	problemNotesHandler := handler.NewProblemNotesHandler(db)
+	problemAttemptsHandler := handler.NewProblemAttemptsHandler(db, submissionRepo)
 	cfWebHandler := handler.NewCFWebHandler(db, cfg.CFAPIKey, cfg.CFAPISecret, cfg.CredEncKey)
 
 	// Create and start server
@@ -111,7 +116,20 @@ func main() {
 	app := srv.App()
 
 	// Register routes
-	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, extKeyHandler, tlxImportHandler, tlxSubmitHandler, cfSyncHandler, cfWebHandler, cfg)
+	// The problemset has no button any more, so something has to keep it current: at
+	// boot, and then daily. It is ten thousand rows behind one unauthenticated API call,
+	// which is why it runs on a ticker instead of hanging off a page open the way the
+	// contest list does — nothing a user clicks should wait for it.
+	go func() {
+		cfSyncHandler.EnsureProblemsetFresh()
+		ticker := time.NewTicker(12 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			cfSyncHandler.EnsureProblemsetFresh()
+		}
+	}()
+
+	registerRoutes(app, authHandler, graderHandler, syncHandler, problemHandler, submissionHandler, dashboardHandler, accountHandler, settingsHandler, snippetHandler, extKeyHandler, tlxImportHandler, tlxSubmitHandler, cfSyncHandler, cfWebHandler, problemNotesHandler, problemAttemptsHandler, cfg)
 
 	// Start listening (blocks until shutdown)
 	if err := srv.Listen(); err != nil {
@@ -137,6 +155,8 @@ func registerRoutes(
 	tlxSubmitHandler *handler.TLXSubmitHandler,
 	cfSyncHandler *handler.CFSyncHandler,
 	cfWebHandler *handler.CFWebHandler,
+	problemNotesHandler *handler.ProblemNotesHandler,
+	problemAttemptsHandler *handler.ProblemAttemptsHandler,
 	cfg *config.Config,
 ) {
 	// Health
@@ -181,6 +201,11 @@ func registerRoutes(
 
 	// Problems (JWT protected)
 	problems := app.Group("/api/problems", middleware.AuthRequired(cfg.JWT))
+	// Per-viewer additions to a shared problem: what they wrote down, and what they have
+	// already run against it.
+	problems.Get("/:id/note", problemNotesHandler.GetNote)
+	problems.Put("/:id/note", problemNotesHandler.SaveNote)
+	problems.Get("/:id/attempts", problemAttemptsHandler.ListAttempts)
 	problems.Get("/", problemHandler.List)
 	problems.Get("/search", problemHandler.Search)
 	problems.Get("/by-provider/:provider/:problemId", problemHandler.GetByProviderAndID)
@@ -232,6 +257,9 @@ func registerRoutes(
 	dashboard.Get("/activity", dashboardHandler.Activity)
 	dashboard.Get("/heatmap", dashboardHandler.Heatmap)
 	dashboard.Get("/tag-weakness", dashboardHandler.TagWeakness)
+	// "What should I solve next", answered from the tag record and the rating already in
+	// the database — no fetch, no browser.
+	dashboard.Get("/recommendations", dashboardHandler.Recommendations)
 
 	// Codeforces via the official API. Separate from /api/sync, which is the
 	// extension's HMAC-signed door: these are user-triggered from the web app, so

@@ -20,6 +20,11 @@ type Problem struct {
 	TimeLimit   string    `gorm:"size:20" json:"timeLimit"`
 	MemoryLimit string    `gorm:"size:20" json:"memoryLimit"`
 	Tags        string    `gorm:"type:text" json:"tags"` // JSON array
+	// Materials is what the provider links beside the problem — the editorial, mostly —
+	// as a JSON array of {title, url}. It arrives with the statement upload rather than
+	// from a fetch of its own: Codeforces prints these links on the problem page, so the
+	// page CPHub already has carries them. Text for the same reason Tags is.
+	Materials string `gorm:"type:text;default:'[]'" json:"materials"`
 	URL         string    `gorm:"size:500" json:"url"`
 	Status      string    `gorm:"default:'unsolved';size:20" json:"status"` // unsolved, solved, attempted
 	SyncedAt    time.Time  `json:"syncedAt"`

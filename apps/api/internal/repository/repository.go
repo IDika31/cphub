@@ -251,6 +251,28 @@ func (r *ProblemRepository) UserProblemStatus(
 	return solved, attempted, nil
 }
 
+// FindLocalByProblem is one problem's own run history for one user, newest first, code
+// included. The Submissions page pages through everything; this answers the narrower
+// question the problem page asks — "what have I already tried here" — so it takes a
+// small limit instead of an offset.
+func (r *SubmissionRepository) FindLocalByProblem(
+	userID, problemID uuid.UUID, limit int,
+) ([]model.LocalSubmission, error) {
+	if limit < 1 || limit > 50 {
+		limit = 20
+	}
+	var subs []model.LocalSubmission
+	err := r.db.
+		Where("user_id = ? AND problem_id = ?", userID, problemID).
+		Order("executed_at DESC").
+		// Unique tiebreak: a batch of runs can share a timestamp to the second, and
+		// without it the same row can appear twice across two reads.
+		Order("id").
+		Limit(limit).
+		Find(&subs).Error
+	return subs, err
+}
+
 // Submission
 //
 // Local runs carry no provider of their own — it comes from the problem they ran

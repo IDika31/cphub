@@ -12,6 +12,10 @@ export interface Problem {
   timeLimit: string;
   memoryLimit: string;
   tags: string;
+  /** JSON array of {title, url} — what the provider links beside the problem, the
+   *  editorial above all. Filled by the statement upload, so it is empty until a
+   *  statement has been read for this problem. */
+  materials?: string;
   url: string;
   status: string;
   syncedAt: string;

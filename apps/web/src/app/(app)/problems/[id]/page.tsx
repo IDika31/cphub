@@ -10,6 +10,8 @@ import Button from "@/components/ui/button";
 import Select from "@/components/ui/select";
 import MonacoEditor from "@/components/editor/monaco-editor";
 import ProblemPane from "@/components/editor/problem-pane";
+import NotesPanel from "@/components/editor/notes-panel";
+import AttemptsPanel from "@/components/editor/attempts-panel";
 import AlgoSearch from "@/components/editor/algo-search";
 import Splitter from "@/components/editor/splitter";
 import SubmitPopup from "@/components/ui/submit-popup";
@@ -55,7 +57,9 @@ export default function ProblemDetailPage() {
   const [submitResult, setSubmitResult] = useState<SubmitTLXResult | null>(null);
   const [submitError, setSubmitError] = useState("");
   const [popupOpen, setPopupOpen] = useState(false);
-  const [tab, setTab] = useState<"grader" | "testcases">("grader");
+  const [tab, setTab] = useState<"grader" | "testcases" | "notes" | "attempts">("grader");
+  // Bumped after a run so the attempts list picks up the row the grader just wrote.
+  const [attemptsKey, setAttemptsKey] = useState(0);
   // Pane sizes live here as percentages so the ratio survives a window resize.
   const [leftPct, setLeftPct] = useState(42);
   const [editorPct, setEditorPct] = useState(62);
@@ -281,6 +285,9 @@ export default function ProblemDetailPage() {
         getToken(),
       );
       setResult(res);
+      // The grader wrote a local_submissions row for this run, so the history tab has
+      // something new to show — and it is the run the user is looking at right now.
+      setAttemptsKey((k) => k + 1);
     } catch (err) {
       // Silent failure here looked identical to "compiled fine, no output".
       addToast("error", `Grader gagal: ${(err as Error).message || "cek API & compiler di host"}`);
@@ -518,6 +525,8 @@ export default function ProblemDetailPage() {
               {([
                 { id: "grader", label: "Grader" },
                 { id: "testcases", label: "Test Cases" },
+                { id: "notes", label: "Catatan" },
+                { id: "attempts", label: "Riwayat" },
               ] as const).map((t) => (
                 <button
                   key={t.id}
@@ -702,6 +711,26 @@ export default function ProblemDetailPage() {
                     </div>
                   ))}
                 </div>
+              )}
+
+              {/* Both of these are per viewer, unlike everything else about a problem:
+                  the note is what this person worked out, the history is what this
+                  person ran. Keyed on the canonical id so they follow the problem and
+                  not the URL the user happened to arrive by. */}
+              {tab === "notes" && <NotesPanel problemId={keyIdRef.current || id} />}
+
+              {tab === "attempts" && (
+                <AttemptsPanel
+                  problemId={keyIdRef.current || id}
+                  currentCode={code}
+                  reloadKey={attemptsKey}
+                  onUseCode={(source, lang) => {
+                    // Loading an old attempt sets the language too: reading C++ into a
+                    // Python buffer would compile the wrong thing on the next Run.
+                    if (lang && lang !== language) setLanguage(lang);
+                    handleCodeChange(source);
+                  }}
+                />
               )}
             </div>
           </div>

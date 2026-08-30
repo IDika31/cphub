@@ -38,3 +38,58 @@ export async function fetchProblem(id: string): Promise<Problem> {
 export async function searchProblems(q: string): Promise<{ data: Problem[]; total: number }> {
   return apiClient(`/api/problems/search?q=${encodeURIComponent(q)}`);
 }
+
+/** One thing the user wrote down about a problem. Absent is not an error — the editor
+ *  opens on every problem — so the server answers an empty body instead of a 404. */
+export interface ProblemNote {
+  body: string;
+  updatedAt: string | null;
+}
+
+export async function fetchProblemNote(id: string): Promise<ProblemNote> {
+  return apiClient(`/api/problems/${encodeURIComponent(id)}/note`);
+}
+
+/** Saving an empty body deletes the note rather than storing a blank one. */
+export async function saveProblemNote(id: string, body: string): Promise<ProblemNote> {
+  return apiClient(`/api/problems/${encodeURIComponent(id)}/note`, {
+    method: "PUT",
+    body: JSON.stringify({ body }),
+  });
+}
+
+/** One grader run against this problem, code included — which is the point: the code was
+ *  always stored and never readable, so "what changed between the WA and the AC" had no
+ *  answer in the app holding both versions. */
+export interface ProblemAttempt {
+  id: string;
+  language: string;
+  verdict: string;
+  runtime: number;
+  memory: number;
+  passedTests: number;
+  totalTests: number;
+  sourceCode: string;
+  executedAt: string;
+}
+
+export async function fetchProblemAttempts(id: string, limit = 20): Promise<{ data: ProblemAttempt[] }> {
+  return apiClient(`/api/problems/${encodeURIComponent(id)}/attempts?limit=${limit}`);
+}
+
+/** What the provider links beside a problem — the editorial, mostly. Stored on the problem
+ *  row as a JSON array by the statement upload, so this parses rather than fetches. */
+export interface ProblemMaterial {
+  title: string;
+  url: string;
+}
+
+export function parseMaterials(raw?: string): ProblemMaterial[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as ProblemMaterial[];
+    return Array.isArray(parsed) ? parsed.filter((m) => m && m.url) : [];
+  } catch {
+    return [];
+  }
+}

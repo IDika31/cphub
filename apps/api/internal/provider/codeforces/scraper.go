@@ -91,9 +91,66 @@ func parseHTML(html, problemID, pageURL string) *model.Problem {
 		TimeLimit:    extractLimitText(html, "time-limit"),
 		MemoryLimit:  extractLimitText(html, "memory-limit"),
 		Tags:         extractTags(html),
+		Materials:    extractMaterials(html),
 		URL:          pageURL,
 		TestCases:    extractSampleTests(html),
 	}
+}
+
+// materialsCaption is the sidebar box Codeforces prints the editorial in. Anchored on
+// the caption and the list that follows it, NOT on "every /blog/entry link on the page":
+// the same sidebar carries a Recent actions box, so a page-wide sweep would file
+// whatever the community happened to post today as this problem's editorial.
+var (
+	materialsCaption = regexp.MustCompile(`(?i)Contest materials`)
+	blogLinkRe       = regexp.MustCompile(`(?is)<a[^>]+href="(/blog/entry/\d+[^"]*)"[^>]*>(.*?)</a>`)
+)
+
+// extractMaterials returns the links beside a problem as a JSON array of {title, url},
+// or "[]" when the box is absent — which it is for a problem whose round has no
+// editorial published yet, and for gym problems.
+func extractMaterials(html string) string {
+	const empty = "[]"
+	at := materialsCaption.FindStringIndex(html)
+	if at == nil {
+		return empty
+	}
+	// The list that follows the caption. Bounded by its own </ul> so the extraction
+	// cannot run on into the next sidebar box.
+	rest := html[at[1]:]
+	start := strings.Index(rest, "<ul")
+	if start < 0 {
+		return empty
+	}
+	end := strings.Index(rest[start:], "</ul>")
+	if end < 0 {
+		return empty
+	}
+	block := rest[start : start+end]
+
+	type material struct {
+		Title string `json:"title"`
+		URL   string `json:"url"`
+	}
+	out := make([]material, 0, 4)
+	seen := map[string]bool{}
+	for _, m := range blogLinkRe.FindAllStringSubmatch(block, -1) {
+		url := "https://codeforces.com" + htmlUnescape(m[1])
+		title := cleanText(htmlText(m[2]))
+		if title == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		out = append(out, material{Title: title, URL: url})
+	}
+	if len(out) == 0 {
+		return empty
+	}
+	blob, err := json.Marshal(out)
+	if err != nil {
+		return empty
+	}
+	return string(blob)
 }
 
 // zoneMarkers are the sections the problem pane renders as its own labelled

@@ -381,83 +381,19 @@ func (h *DashboardHandler) TagWeakness(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "Unauthenticated"})
 	}
-	provider := c.Query("provider")
 	limit := c.QueryInt("limit")
 	if limit <= 0 || limit > 50 {
 		limit = 12
 	}
 
-	var rows []struct {
-		Provider   string
-		ProblemRef string
-		Verdict    string
-		Tags       string
-	}
-	q := h.db.Table("external_submissions AS es").
-		Select("es.provider, es.problem_ref, es.verdict, COALESCE(p.tags, '[]') AS tags").
-		Joins("JOIN problems p ON p.provider = es.provider AND p.problem_id = es.problem_ref").
-		Where("es.user_id = ?", userID)
-	if provider != "" {
-		q = q.Where("es.provider = ?", provider)
-	}
-	if err := q.Scan(&rows).Error; err != nil {
+	out, err := h.tagStats(userID, c.Query("provider"))
+	if err != nil {
+		log.Printf("[dashboard] tag stats failed: %v", err)
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to load tags"})
 	}
-
-	type tagStat struct {
-		Tag      string  `json:"tag"`
-		Total    int     `json:"total"`
-		Failed   int     `json:"failed"`
-		Solved   int     `json:"solved"`
-		PassRate float64 `json:"passRate"`
-	}
-	// Counted per problem, not per submission: five failed attempts at one dp
-	// problem should not read as five dp weaknesses.
-	tried := map[string]map[string]bool{}
-	solved := map[string]map[string]bool{}
-	for _, r := range rows {
-		var tags []string
-		if e := json.Unmarshal([]byte(r.Tags), &tags); e != nil {
-			continue
-		}
-		key := r.Provider + "/" + r.ProblemRef
-		for _, t := range tags {
-			if t == "" {
-				continue
-			}
-			if tried[t] == nil {
-				tried[t] = map[string]bool{}
-				solved[t] = map[string]bool{}
-			}
-			tried[t][key] = true
-			if isAccepted(r.Verdict) {
-				solved[t][key] = true
-			}
-		}
-	}
-
-	out := make([]tagStat, 0, len(tried))
-	for tag, problems := range tried {
-		total := len(problems)
-		ok := len(solved[tag])
-		out = append(out, tagStat{
-			Tag:      tag,
-			Total:    total,
-			Solved:   ok,
-			Failed:   total - ok,
-			PassRate: float64(ok) / float64(total) * 100,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].PassRate != out[j].PassRate {
-			return out[i].PassRate < out[j].PassRate
-		}
-		return out[i].Total > out[j].Total
-	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
-
 	return c.JSON(fiber.Map{"data": out})
 }
 

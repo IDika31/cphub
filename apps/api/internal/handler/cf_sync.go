@@ -37,19 +37,12 @@ var problemUpsert = clause.OnConflict{
 	DoUpdates: clause.AssignmentColumns([]string{"title", "difficulty", "tags", "url", "synced_at", "updated_at"}),
 }
 
-// SyncProblemset imports the whole public problemset — roughly ten thousand
-// problems with rating and tags, no statements, since the API has no method that
-// returns them.
-func (h *CFSyncHandler) SyncProblemset(c *fiber.Ctx) error {
-	started := time.Now()
-	problems, _, err := h.api.ProblemsetProblems(c.Query("tags"))
-	if err != nil {
-		log.Printf("[cf-sync] problemset fetch failed: %v", err)
-		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil problemset Codeforces: " + err.Error()})
-	}
-
-	rows := make([]model.Problem, 0, len(problems))
+// storeProblemset writes the metadata rows. Shared by the endpoint and by the startup
+// refresher, because two copies of a batched upsert is two places for the batch size and
+// the conflict clause to drift apart.
+func (h *CFSyncHandler) storeProblemset(problems []codeforces.APIProblem) (written int, err error) {
 	now := time.Now()
+	rows := make([]model.Problem, 0, len(problems))
 	for _, p := range problems {
 		if p.ContestID == 0 || p.Index == "" {
 			continue // acmsguru and similar entries have no problemset URL
@@ -65,19 +58,37 @@ func (h *CFSyncHandler) SyncProblemset(c *fiber.Ctx) error {
 			SyncedAt:   now,
 		})
 	}
-
-	written := 0
+	// Five hundred at a time: one statement for ten thousand rows is a statement Postgres
+	// has to plan and hold in memory all at once, on a box with 892 MB.
 	for start := 0; start < len(rows); start += 500 {
 		end := start + 500
 		if end > len(rows) {
 			end = len(rows)
 		}
 		batch := rows[start:end]
-		if err := h.db.Clauses(problemUpsert).Create(&batch).Error; err != nil {
-			log.Printf("[cf-sync] problemset batch %d failed: %v", start, err)
-			return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan problemset", "written": written})
+		if bErr := h.db.Clauses(problemUpsert).Create(&batch).Error; bErr != nil {
+			return written, fmt.Errorf("problemset batch %d: %w", start, bErr)
 		}
 		written += len(batch)
+	}
+	return written, nil
+}
+
+// SyncProblemset imports the whole public problemset — roughly ten thousand
+// problems with rating and tags, no statements, since the API has no method that
+// returns them.
+func (h *CFSyncHandler) SyncProblemset(c *fiber.Ctx) error {
+	started := time.Now()
+	problems, _, err := h.api.ProblemsetProblems(c.Query("tags"))
+	if err != nil {
+		log.Printf("[cf-sync] problemset fetch failed: %v", err)
+		return c.Status(fiber.StatusFailedDependency).JSON(fiber.Map{"error": "Gagal mengambil problemset Codeforces: " + err.Error()})
+	}
+
+	written, err := h.storeProblemset(problems)
+	if err != nil {
+		log.Printf("[cf-sync] problemset store failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan problemset", "written": written})
 	}
 
 	log.Printf("[cf-sync] problemset: %d fetched, %d written in %s", len(problems), written, time.Since(started).Round(time.Millisecond))
@@ -104,6 +115,64 @@ func (h *CFSyncHandler) SyncContests(c *fiber.Ctx) error {
 	}
 	log.Printf("[cf-sync] contests: %d fetched, %d written in %s", fetched, written, time.Since(started).Round(time.Millisecond))
 	return c.JSON(fiber.Map{"fetched": fetched, "written": written, "elapsed": time.Since(started).Round(time.Millisecond).String()})
+}
+
+// problemsetFreshness is how old the stored Codeforces problemset may be before it is
+// refetched. Seven days because what changes in it is slow — a new round adds a handful
+// of problems and ratings settle over weeks — while the fetch itself is ten thousand rows,
+// far too heavy to hang off a page open the way the contest list does.
+const problemsetFreshness = 7 * 24 * time.Hour
+
+var problemsetRefresh struct {
+	mu      sync.Mutex
+	lastTry time.Time
+}
+
+// EnsureProblemsetFresh imports the problemset when there is none, or when what is stored
+// has aged out. Called from a ticker at startup rather than from a request: nothing a user
+// does should wait on ten thousand rows, and the only manual trigger this ever had was a
+// button whose right moment nobody could know.
+//
+// Errors are logged and swallowed. A stale problemset still serves the Problemset page and
+// the recommender; a failed refresh must not turn into a failed anything else.
+func (h *CFSyncHandler) EnsureProblemsetFresh() {
+	problemsetRefresh.mu.Lock()
+	if time.Since(problemsetRefresh.lastTry) < problemsetFreshness {
+		problemsetRefresh.mu.Unlock()
+		return
+	}
+	problemsetRefresh.lastTry = time.Now()
+	problemsetRefresh.mu.Unlock()
+
+	var newest *time.Time
+	var count int64
+	if err := h.db.Model(&model.Problem{}).Where("provider = ?", "codeforces").
+		Select("MAX(synced_at)").Scan(&newest).Error; err != nil {
+		log.Printf("[cf-sync] could not read problemset freshness: %v", err)
+		return
+	}
+	if err := h.db.Model(&model.Problem{}).Where("provider = ?", "codeforces").
+		Count(&count).Error; err != nil {
+		log.Printf("[cf-sync] could not count the problemset: %v", err)
+		return
+	}
+	if count > 0 && newest != nil && time.Since(*newest) < problemsetFreshness {
+		return
+	}
+
+	started := time.Now()
+	problems, _, err := h.api.ProblemsetProblems("")
+	if err != nil {
+		log.Printf("[cf-sync] problemset auto-import failed: %v", err)
+		return
+	}
+	written, err := h.storeProblemset(problems)
+	if err != nil {
+		log.Printf("[cf-sync] problemset auto-import could not be stored: %v", err)
+		return
+	}
+	log.Printf("[cf-sync] problemset auto-imported: %d fetched, %d written in %s",
+		len(problems), written, time.Since(started).Round(time.Millisecond))
 }
 
 // contestFreshness is how old the stored contest list may be before a read

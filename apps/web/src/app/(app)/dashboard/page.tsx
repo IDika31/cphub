@@ -11,11 +11,12 @@ import { Panel, StatCard, EmptyPanel, BarList, VERDICT_COLORS, VERDICT_LABELS } 
 import ActivityHeatmap from "@/components/dashboard/activity-heatmap";
 import ProgressChart from "@/components/dashboard/progress-chart";
 import {
-  fetchDashboardOverview, fetchActivity, fetchProgress, fetchTagWeakness,
+  fetchDashboardOverview, fetchActivity, fetchProgress, fetchTagWeakness, fetchRecommendations,
   syncCFSubmissions, syncTLXSubmissions,
   type DashboardOverview, type ProviderStats, type ActivityDay, type SeriesPoint, type TagStat,
-  type ProgressSeries,
+  type ProgressSeries, type Recommendation, type RecommendationBasis,
 } from "@/lib/api/dashboard";
+import { RecommendPanel } from "@/components/dashboard/recommend-panel";
 import { providerLabel, accountIdentity, isTLXFamily } from "@/lib/providers";
 import {
   RefreshCw, CheckCircle2, Send, Target, Trophy, Flame, Link2, ArrowRight, Library, Percent,
@@ -44,6 +45,14 @@ export default function DashboardPage() {
   const [progress, setProgress] = useState<ProgressSeries>({});
   const [tags, setTags] = useState<TagStat[]>([]);
   const [tagsLoading, setTagsLoading] = useState(true);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [recommendBasis, setRecommendBasis] = useState<RecommendationBasis | undefined>();
+  const [recommendLoading, setRecommendLoading] = useState(true);
+  const [recommendError, setRecommendError] = useState("");
+  // Bumped when the overview finishes, so panels that depend on the same data — the
+  // recommender reads the solves a sync just wrote — reload with it instead of each
+  // keeping its own idea of when the numbers last moved.
+  const [loadedAt, setLoadedAt] = useState(0);
   const [scope, setScope] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -69,6 +78,7 @@ export default function DashboardPage() {
     setActivity(act.data);
     setProgress(prog);
     setLoading(false);
+    setLoadedAt(Date.now());
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -87,6 +97,27 @@ export default function DashboardPage() {
       .finally(() => { if (!cancelled) setTagsLoading(false); });
     return () => { cancelled = true; };
   }, [scope]);
+
+  // Recommendations are Codeforces-only and read the whole history, so they do not
+  // follow the provider tabs — the same list is the answer whichever tab is open.
+  // Reloaded when the overview reloads (a sync may have added the solves that change
+  // the picks), which is what loadedAt tracks.
+  useEffect(() => {
+    let cancelled = false;
+    setRecommendLoading(true);
+    setRecommendError("");
+    fetchRecommendations(8)
+      .then((res) => {
+        if (cancelled) return;
+        setRecommendations(res.data);
+        setRecommendBasis(res.basis);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setRecommendError((err as Error).message || "Gagal memuat rekomendasi");
+      })
+      .finally(() => { if (!cancelled) setRecommendLoading(false); });
+    return () => { cancelled = true; };
+  }, [loadedAt]);
 
   const providers = data?.providers ?? [];
   const selected = useMemo(
@@ -115,12 +146,60 @@ export default function DashboardPage() {
       .filter((d) => d.count > 0);
   }, [activity, scope]);
 
-  async function runSync(kind: "cf" | "tlx") {
+  // How long a provider's submissions may go unsynced before opening the dashboard
+  // refreshes them. Half an hour is the useful side of the trade: a contest's verdicts
+  // land within minutes, and nobody needs the page to poll a judge every visit.
+  const AUTO_SYNC_AFTER_MS = 30 * 60 * 1000;
+
+  // Automatic, once per provider per window, in place of the buttons that used to sit in
+  // the topbar. The buttons were the wrong shape for the job: pressing them was the only
+  // way the dashboard ever became current, so the numbers were stale exactly when nobody
+  // remembered to press.
+  //
+  // Gated in localStorage rather than on the server: the sync endpoints are idempotent,
+  // so the worst case of two browsers each firing once is two identical fetches, and
+  // keeping it client-side means no schema and no scheduler.
+  useEffect(() => {
+    if (loading || syncing !== "") return;
+    const due = (kind: "cf" | "tlx") => {
+      try {
+        const last = Number(localStorage.getItem(`cphub_last_sync_${kind}`) ?? 0);
+        return !Number.isFinite(last) || Date.now() - last > AUTO_SYNC_AFTER_MS;
+      } catch {
+        // Private mode, or storage disabled: sync once per page load rather than never.
+        return true;
+      }
+    };
+    const kind: "cf" | "tlx" | null = cf?.connected && due("cf")
+      ? "cf"
+      : tlxConnected.length > 0 && due("tlx")
+        ? "tlx"
+        : null;
+    if (!kind) return;
+    try {
+      // Stamped before the call, not after: a sync that fails must not retry on every
+      // render for the next half hour.
+      localStorage.setItem(`cphub_last_sync_${kind}`, String(Date.now()));
+    } catch {
+      /* nothing to remember it with */
+    }
+    // One provider per pass. The effect runs again when `syncing` clears, so the second
+    // provider follows without both hitting the API at once on a slow connection.
+    void runSync(kind, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, syncing, cf?.connected, tlxConnected.length]);
+
+  async function runSync(kind: "cf" | "tlx", opts: { silent?: boolean } = {}) {
     setSyncing(kind);
     try {
       if (kind === "cf") {
         const res = await syncCFSubmissions();
-        addToast("success", `Codeforces: ${res.submissions} submission baru, ${res.problems} problem baru (dari ${res.fetched} diambil)`);
+        // An automatic run says nothing when it worked: a toast on every dashboard open
+        // is noise about something the user did not ask for. Failures still speak — an
+        // expired Codeforces session is theirs to fix.
+        if (!opts.silent) {
+          addToast("success", `Codeforces: ${res.submissions} submission baru, ${res.problems} problem baru (dari ${res.fetched} diambil)`);
+        }
       } else {
         const res = await syncTLXSubmissions();
         const off = res.official
@@ -132,7 +211,9 @@ export default function DashboardPage() {
         // only way a self-hosted instance with an expired token gets reported —
         // otherwise it silently stops advancing behind a green toast.
         const failed = (res.instances ?? []).filter((i) => i.error);
-        if (failed.length > 0) {
+        if (opts.silent && failed.length === 0) {
+          // Same rule as above: silence on success.
+        } else if (failed.length > 0) {
           // "info", not "error": the counts above are real, the failure is partial.
           // Every instance failing comes back 424 and lands in the catch below.
           addToast("info", `${base} · gagal: ${failed.map((f) => `${f.host} (${f.error})`).join(", ")}`);
@@ -159,24 +240,15 @@ export default function DashboardPage() {
         {providers.filter((p) => p.connected).map((p) => (
           <ProviderChip key={p.provider} stats={p} />
         ))}
-        <Button
-          variant="default"
-          onClick={() => runSync("cf")}
-          disabled={syncing !== "" || !cf?.connected}
-          title={cf?.connected ? "Ambil ulang submission Codeforces" : "Hubungkan Codeforces dulu"}
-        >
-          <RefreshCw className={`w-3 h-3 ${syncing === "cf" ? "animate-spin" : ""}`} aria-hidden="true" />
-          {syncing === "cf" ? "Syncing..." : "Sync CF"}
-        </Button>
-        <Button
-          variant="default"
-          onClick={() => runSync("tlx")}
-          disabled={syncing !== "" || tlxConnected.length === 0}
-          title={tlxConnected.length > 0 ? "Ambil ulang submission dari semua instance TLX terhubung" : "Hubungkan TLX dulu"}
-        >
-          <RefreshCw className={`w-3 h-3 ${syncing === "tlx" ? "animate-spin" : ""}`} aria-hidden="true" />
-          {syncing === "tlx" ? "Syncing..." : "Sync TLX"}
-        </Button>
+        {/* No Sync buttons. Nobody could know when to press them, and the answer was
+            always "whenever you happen to think of it" — see the auto-sync effect
+            above. This says what is happening instead. */}
+        {syncing !== "" && (
+          <span className="flex items-center gap-1.5 text-[11px] text-[#a1a1aa]" aria-live="polite">
+            <RefreshCw className="w-3 h-3 animate-spin" aria-hidden="true" />
+            {`Menyegarkan ${syncing === "cf" ? "Codeforces" : "TLX"}...`}
+          </span>
+        )}
       </Topbar>
 
       <div className="flex-1 overflow-y-auto p-[14px] space-y-4">
@@ -204,6 +276,15 @@ export default function DashboardPage() {
             <ArrowRight className="w-4 h-4 text-[#a78bfa] group-hover:translate-x-0.5 transition-transform" aria-hidden="true" />
           </Link>
         )}
+
+        {/* Above the tabs on purpose: the picks are not a per-provider statistic, they
+            are the one thing on this page that tells the user what to do next. */}
+        <RecommendPanel
+          data={recommendations}
+          basis={recommendBasis}
+          loading={recommendLoading}
+          error={recommendError}
+        />
 
         <ScopeTabs
           scope={scope}
