@@ -90,13 +90,24 @@ func seedExternal(t *testing.T, db *gorm.DB, uid uuid.UUID, ref, verdict string)
 
 func recommend(t *testing.T, db *gorm.DB, uid uuid.UUID) map[string]any {
 	t.Helper()
+	return recommendQuery(t, db, uid, "")
+}
+
+// recommendQuery is the same request with a query string, for the tag filter the practice
+// page's chips send.
+func recommendQuery(t *testing.T, db *gorm.DB, uid uuid.UUID, query string) map[string]any {
+	t.Helper()
 	h := &DashboardHandler{db: db}
 	app := fiber.New()
 	app.Get("/r", func(c *fiber.Ctx) error {
 		c.Locals("userId", uid.String())
 		return h.Recommendations(c)
 	})
-	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/r", nil))
+	target := "/r"
+	if query != "" {
+		target += "?" + query
+	}
+	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, target, nil))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -230,4 +241,40 @@ func TestRatingBandSources(t *testing.T) {
 			t.Errorf("lo = %d, want the 800 floor", lo)
 		}
 	})
+}
+
+// The chips on the practice page are filters, not labels: asking for a tag has to narrow
+// the picks to that tag even when the derived weak set says something else.
+func TestRecommendationsHonourTheRequestedTag(t *testing.T) {
+	db := setupRecommendDB(t)
+	me := uuid.New()
+	seedCFRating(t, db, me, 1500)
+
+	// dp is the weak tag, twice over.
+	seedCandidate(t, db, "100A", 1500, `["dp"]`)
+	seedCandidate(t, db, "100B", 1500, `["dp"]`)
+	seedExternal(t, db, me, "100A", "WRONG_ANSWER")
+	seedExternal(t, db, me, "100B", "WRONG_ANSWER")
+	// One candidate per tag, both in band and untouched.
+	seedCandidate(t, db, "200A", 1600, `["dp"]`)
+	seedCandidate(t, db, "200B", 1600, `["strings"]`)
+
+	if got := refsIn(t, recommend(t, db, me)); len(got) != 1 || got[0] != "200A" {
+		t.Fatalf("unfiltered picks = %v, want the dp problem", got)
+	}
+
+	out := recommendQuery(t, db, me, "tag=strings")
+	if got := refsIn(t, out); len(got) != 1 || got[0] != "200B" {
+		t.Errorf("picks for tag=strings = %v, want 200B", got)
+	}
+	basis, _ := out["basis"].(map[string]any)
+	if basis["tag"] != "strings" {
+		t.Errorf("basis.tag = %v, want strings echoed back", basis["tag"])
+	}
+	// The chips have to survive being clicked: the option list is the user's whole record,
+	// not just the tags this response drew from.
+	options, _ := basis["tagOptions"].([]any)
+	if len(options) == 0 || options[0] != "dp" {
+		t.Errorf("basis.tagOptions = %v, want dp still listed", options)
+	}
 }

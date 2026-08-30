@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Files, ClipboardList, Link as LinkIcon,
   Settings, Activity, Puzzle, LogOut, ChevronLeft, ChevronDown, Plus, Trophy, ShieldAlert,
+  Lightbulb,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { fetchConnections, type LinkedAccount } from "@/lib/api/connections";
@@ -35,6 +36,10 @@ const VERIFY_CF_ITEM: NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  // Next to Problemset because that is where it sends you. It used to be a panel on the
+  // dashboard, which reads as "how am I doing" — this answers "what now", and the two
+  // want different pages.
+  { href: "/practice", label: "Latihan", icon: Lightbulb },
   { href: "/problems", label: "Problemset", icon: Files, hasSubmenu: true },
   { href: "/contests", label: "Contest", icon: Trophy },
   { href: "/submissions", label: "Submission", icon: ClipboardList, hasSubmenu: true },

@@ -124,7 +124,7 @@ func (h *DashboardHandler) Recommendations(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "Unauthenticated"})
 	}
 	limit := c.QueryInt("limit")
-	if limit <= 0 || limit > 30 {
+	if limit <= 0 || limit > 50 {
 		limit = 8
 	}
 	const provider = "codeforces"
@@ -143,6 +143,14 @@ func (h *DashboardHandler) Recommendations(c *fiber.Ctx) error {
 		if len(weak) == recommendWeakTags {
 			break
 		}
+	}
+	// A tag the caller asked for wins over the derived set. The practice page offers the
+	// weak tags as chips, and picking one has to narrow the list to exactly that tag —
+	// otherwise the chip would be a label rather than a filter. Trusted as a string
+	// because it is only ever matched against the stored tags, never interpolated.
+	picked := strings.ToLower(strings.TrimSpace(c.Query("tag")))
+	if picked != "" {
+		weak = []string{picked}
 	}
 
 	lo, hi, basis := h.ratingBand(userID, provider)
@@ -199,7 +207,14 @@ func (h *DashboardHandler) Recommendations(c *fiber.Ctx) error {
 		"basis": fiber.Map{
 			"ratingFrom": basis,
 			"band":       []int{lo, hi},
-			"weakTags":   weak,
+			// The tags the picks were drawn from — the derived set, or the single tag the
+			// caller asked for.
+			"weakTags": weak,
+			// Every tag with a record worth showing, so the page can offer the others as
+			// chips while one of them is active. Independent of `weak` on purpose: the
+			// chips must not disappear the moment one is clicked.
+			"tagOptions": tagOptions(stats),
+			"tag":        picked,
 		},
 	})
 }
@@ -268,4 +283,21 @@ func (h *DashboardHandler) ratingBand(userID uuid.UUID, provider string) (lo, hi
 		return lo, solved + bandAbove, "solved"
 	}
 	return defaultLo, defaultHi, defaultBasis
+}
+
+// tagOptions is the tag list the practice page renders as chips: the ones this user has a
+// real record in, worst first, capped so the row stays readable.
+func tagOptions(stats []tagStat) []string {
+	const maxOptions = 8
+	out := make([]string, 0, maxOptions)
+	for _, st := range stats {
+		if st.Total < recommendMinAttempts {
+			continue
+		}
+		out = append(out, st.Tag)
+		if len(out) == maxOptions {
+			break
+		}
+	}
+	return out
 }

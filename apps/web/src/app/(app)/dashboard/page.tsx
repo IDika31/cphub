@@ -11,12 +11,11 @@ import { Panel, StatCard, EmptyPanel, BarList, VERDICT_COLORS, VERDICT_LABELS } 
 import ActivityHeatmap from "@/components/dashboard/activity-heatmap";
 import ProgressChart from "@/components/dashboard/progress-chart";
 import {
-  fetchDashboardOverview, fetchActivity, fetchProgress, fetchTagWeakness, fetchRecommendations,
+  fetchDashboardOverview, fetchActivity, fetchProgress, fetchTagWeakness,
   syncCFSubmissions, syncTLXSubmissions,
   type DashboardOverview, type ProviderStats, type ActivityDay, type SeriesPoint, type TagStat,
-  type ProgressSeries, type Recommendation, type RecommendationBasis,
+  type ProgressSeries,
 } from "@/lib/api/dashboard";
-import { RecommendPanel } from "@/components/dashboard/recommend-panel";
 import { providerLabel, accountIdentity, isTLXFamily } from "@/lib/providers";
 import {
   RefreshCw, CheckCircle2, Send, Target, Trophy, Flame, Link2, ArrowRight, Library, Percent,
@@ -45,14 +44,6 @@ export default function DashboardPage() {
   const [progress, setProgress] = useState<ProgressSeries>({});
   const [tags, setTags] = useState<TagStat[]>([]);
   const [tagsLoading, setTagsLoading] = useState(true);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [recommendBasis, setRecommendBasis] = useState<RecommendationBasis | undefined>();
-  const [recommendLoading, setRecommendLoading] = useState(true);
-  const [recommendError, setRecommendError] = useState("");
-  // Bumped when the overview finishes, so panels that depend on the same data — the
-  // recommender reads the solves a sync just wrote — reload with it instead of each
-  // keeping its own idea of when the numbers last moved.
-  const [loadedAt, setLoadedAt] = useState(0);
   const [scope, setScope] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -78,7 +69,6 @@ export default function DashboardPage() {
     setActivity(act.data);
     setProgress(prog);
     setLoading(false);
-    setLoadedAt(Date.now());
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -98,26 +88,6 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, [scope]);
 
-  // Recommendations are Codeforces-only and read the whole history, so they do not
-  // follow the provider tabs — the same list is the answer whichever tab is open.
-  // Reloaded when the overview reloads (a sync may have added the solves that change
-  // the picks), which is what loadedAt tracks.
-  useEffect(() => {
-    let cancelled = false;
-    setRecommendLoading(true);
-    setRecommendError("");
-    fetchRecommendations(8)
-      .then((res) => {
-        if (cancelled) return;
-        setRecommendations(res.data);
-        setRecommendBasis(res.basis);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setRecommendError((err as Error).message || "Gagal memuat rekomendasi");
-      })
-      .finally(() => { if (!cancelled) setRecommendLoading(false); });
-    return () => { cancelled = true; };
-  }, [loadedAt]);
 
   const providers = data?.providers ?? [];
   const selected = useMemo(
@@ -276,15 +246,6 @@ export default function DashboardPage() {
             <ArrowRight className="w-4 h-4 text-[#a78bfa] group-hover:translate-x-0.5 transition-transform" aria-hidden="true" />
           </Link>
         )}
-
-        {/* Above the tabs on purpose: the picks are not a per-provider statistic, they
-            are the one thing on this page that tells the user what to do next. */}
-        <RecommendPanel
-          data={recommendations}
-          basis={recommendBasis}
-          loading={recommendLoading}
-          error={recommendError}
-        />
 
         <ScopeTabs
           scope={scope}

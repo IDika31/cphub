@@ -173,11 +173,21 @@ export interface RecommendationBasis {
    *  nothing at all. */
   ratingFrom: "rating" | "solved" | "default";
   band: [number, number];
+  /** The tags these picks were drawn from — the derived weak set, or the single tag that
+   *  was asked for. */
   weakTags: string[];
+  /** Every tag the user has a record in, for the filter chips. Kept separate from
+   *  weakTags so the chips do not vanish when one of them is active. */
+  tagOptions?: string[];
+  /** The tag currently filtered on, empty when the server chose. */
+  tag?: string;
 }
 
 export async function fetchRecommendations(
   limit = 8,
+  tag?: string,
 ): Promise<{ data: Recommendation[]; basis: RecommendationBasis }> {
-  return apiClient(`/api/dashboard/recommendations?limit=${limit}`);
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (tag) params.set("tag", tag);
+  return apiClient(`/api/dashboard/recommendations?${params.toString()}`);
 }
