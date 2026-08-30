@@ -211,6 +211,7 @@ function webappBridgeFunc() {
     "CF_REGISTER",
     "CF_CONTEST_STATES",
     "CF_STATEMENT",
+    "CF_STATEMENTS_BATCH",
     "CF_CHECK_VERDICT",
     "PING",
   ]);

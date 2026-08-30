@@ -3,7 +3,7 @@ import { syncToAPI, pushCFSession, pushContestStates, type SyncPayload } from ".
 import { ensureCFLogin, peekCFSession } from "../shared/cf-session";
 import { submitCF, fetchCFLanguages, type CFSubmitRequest } from "../shared/cf-submit";
 import { readContestStates, registerContestInBrowser } from "../shared/cf-contests";
-import { fetchProblemStatement } from "../shared/cf-problem";
+import { fetchProblemStatement, fetchStatementsBatch } from "../shared/cf-problem";
 import { pushToOfflineQueue, incrementSyncedCount } from "../shared/storage";
 import { updateBadge } from "./badge";
 import { logger } from "../shared/logger";
@@ -105,6 +105,20 @@ export async function handleMessage(
 				return { success: true, data: await fetchProblemStatement(problemId) };
 			} catch (err) {
 				logger.error("Codeforces statement fetch failed", err);
+				return { success: false, error: (err as Error).message };
+			}
+		}
+		case MESSAGE_TYPES.CF_STATEMENTS_BATCH: {
+			const ids = (message.payload as unknown as { problemIds?: string[] })?.problemIds ?? [];
+			if (!Array.isArray(ids) || ids.length === 0) {
+				return { success: false, error: "problemIds wajib diisi" };
+			}
+			// A batch that partly failed is still a success: the outcomes say which pages were
+			// stored and which were not, and the caller shows both.
+			try {
+				return { success: true, data: { results: await fetchStatementsBatch(ids) } };
+			} catch (err) {
+				logger.error("Codeforces bulk statement fetch failed", err);
 				return { success: false, error: (err as Error).message };
 			}
 		}

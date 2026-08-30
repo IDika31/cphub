@@ -199,3 +199,29 @@ export const CF_SESSION_EVENT = "cphub:cf-session-changed";
 export function announceCFSessionChange() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(CF_SESSION_EVENT));
 }
+
+/** A Codeforces problem that is synced but has no statement yet — the editor can open it
+ *  and has nothing to read. The extension fills these in from the user's own browser. */
+export interface PendingStatement {
+  problemId: string;
+  title: string;
+  difficulty: number;
+}
+
+/** Filters mirror the ones Codeforces' own problemset page offers: tags (ANDed, as it does)
+ *  and a rating range. Applied to the rows already synced from the API, which is why this
+ *  needs no request to Codeforces at all. */
+export async function fetchMissingStatements(params: {
+  tags?: string;
+  minRating?: number;
+  maxRating?: number;
+  limit?: number;
+}): Promise<{ data: PendingStatement[]; remaining: number }> {
+  const q = new URLSearchParams();
+  if (params.tags) q.set("tags", params.tags);
+  if (params.minRating) q.set("minRating", String(params.minRating));
+  if (params.maxRating) q.set("maxRating", String(params.maxRating));
+  if (params.limit) q.set("limit", String(params.limit));
+  const qs = q.toString();
+  return apiClient(`/api/cf/problemset/missing-statements${qs ? `?${qs}` : ""}`);
+}

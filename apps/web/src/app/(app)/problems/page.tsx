@@ -12,6 +12,7 @@ import { TableSkeleton } from "@/components/ui/skeleton";
 import { fetchProblems } from "@/lib/api/problems";
 import type { Problem } from "@/lib/api/types";
 import ImportTLXModal from "@/components/tlx/ImportTLXModal";
+import StatementImport from "@/components/problems/statement-import";
 import { providerLabel, providerBadge } from "@/lib/providers";
 
 const PROVIDERS: Array<{ value: string; label: string }> = [
@@ -138,6 +139,9 @@ function ProblemsetContent() {
               </button>
             )}
           </div>
+          {/* Statements, for a filtered slice of what is already synced. The metadata comes
+              from the API on a ticker; this is the half the API has no method for. */}
+          <StatementImport />
           <Button variant="primary" onClick={() => setImportModalOpen(true)}>
             Import TLX
           </Button>

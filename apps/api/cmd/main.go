@@ -266,6 +266,9 @@ func registerRoutes(
 	// they sit behind the JWT like every other page action.
 	cf := app.Group("/api/cf", middleware.AuthRequired(cfg.JWT))
 	cf.Post("/problemset/sync", cfSyncHandler.SyncProblemset)
+	// Which synced problems still have no statement, filtered the way Codeforces' own
+	// problemset page filters. The extension reads the pages; this says which ones.
+	cf.Get("/problemset/missing-statements", cfSyncHandler.MissingStatements)
 	cf.Post("/contests/sync", cfSyncHandler.SyncContests)
 	cf.Post("/contests/:id/problems/sync", cfSyncHandler.SyncContestProblems)
 

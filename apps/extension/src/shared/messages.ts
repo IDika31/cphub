@@ -44,4 +44,6 @@ export const MESSAGE_TYPES = {
   CF_CONTEST_STATES: "CF_CONTEST_STATES",
   // Statements: the server would need a Cloudflare solve to read the same page.
   CF_STATEMENT: "CF_STATEMENT",
+  // Several statements in one go, for filling a filtered slice of the problemset.
+  CF_STATEMENTS_BATCH: "CF_STATEMENTS_BATCH",
 } as const;

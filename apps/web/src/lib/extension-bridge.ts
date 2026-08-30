@@ -123,6 +123,18 @@ export function fetchStatementViaExtension(
   return callExtension("CF_STATEMENT", { problemId }, 90_000);
 }
 
+/** Reads several problem pages in turn and stores their statements, reporting each one.
+ *
+ *  Small batches on purpose: the extension loads one real Codeforces tab per problem with a
+ *  pause between them, so a long list would be a call nothing could interrupt. The caller
+ *  loops, which is what makes a progress bar and a Stop button possible. Timeout allows a
+ *  few seconds per problem plus the pauses. */
+export function fetchStatementsBatchViaExtension(
+  problemIds: string[],
+): Promise<{ results: Array<{ problemId: string; ok: boolean; title?: string; samples?: number; error?: string }> }> {
+  return callExtension("CF_STATEMENTS_BATCH", { problemIds }, 30_000 + problemIds.length * 20_000);
+}
+
 /** Submits from the user's browser, where the session and the Cloudflare clearance
  *  both already exist. Generous timeout: it opens a page, posts a form and reads the
  *  reply, all over Codeforces' own latency. */

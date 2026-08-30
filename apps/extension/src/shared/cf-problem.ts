@@ -59,3 +59,45 @@ export async function fetchProblemStatement(problemId: string): Promise<CFStatem
   logger.info(`Codeforces statement for ${ref}: ${saved.samples} sample(s) stored`);
   return saved;
 }
+
+/** One problem's outcome in a bulk run. Errors travel per problem rather than failing the
+ *  whole batch: a single deleted or gym-only problem must not stop the other twenty. */
+export interface CFStatementOutcome {
+  problemId: string;
+  ok: boolean;
+  title?: string;
+  samples?: number;
+  error?: string;
+}
+
+/** Pause between pages in a bulk run. Codeforces asks for roughly one request every two
+ *  seconds and these are full page loads in a real tab, so this is deliberately slower than
+ *  it has to be — a bulk import is background work, and being throttled or challenged costs
+ *  far more than the wait. */
+const BULK_DELAY_MS = 1500;
+
+/**
+ * fetchStatementsBatch reads several problem pages in turn and reports each one.
+ *
+ * Sequential on purpose: two Codeforces tabs at once is both rude and slower in practice,
+ * since the second competes for the same rate limit. The caller asks for small batches and
+ * loops, which is what makes progress visible and a Stop button possible — one long call
+ * would be a request nothing could interrupt.
+ */
+export async function fetchStatementsBatch(problemIds: string[]): Promise<CFStatementOutcome[]> {
+  const out: CFStatementOutcome[] = [];
+  for (let i = 0; i < problemIds.length; i++) {
+    const ref = problemIds[i];
+    try {
+      const saved = await fetchProblemStatement(ref);
+      out.push({ problemId: ref, ok: true, title: saved.title, samples: saved.samples });
+    } catch (err) {
+      out.push({ problemId: ref, ok: false, error: (err as Error).message });
+    }
+    if (i < problemIds.length - 1) {
+      await new Promise((r) => setTimeout(r, BULK_DELAY_MS));
+    }
+  }
+  logger.info(`Codeforces bulk statements: ${out.filter((o) => o.ok).length}/${out.length} stored`);
+  return out;
+}
